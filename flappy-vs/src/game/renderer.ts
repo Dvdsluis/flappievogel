@@ -1,5 +1,8 @@
 import { Player } from '../entities/Player';
 import { Obstacle } from '../entities/Obstacle';
+import { Projectile } from '../entities/Projectile';
+import { Enemy } from '../entities/Enemy';
+import { PowerUp } from '../entities/PowerUp';
 
 export class Renderer {
     private t = 0;
@@ -108,5 +111,30 @@ export class Renderer {
         this.ctx.fillStyle = '#e8e8f0';
         this.ctx.font = '700 24px system-ui, sans-serif';
         this.ctx.fillText(text, 16, 32);
+    }
+
+    drawProjectile(b: Projectile, color: string = '#ffd166') {
+        const { ctx } = this;
+        ctx.fillStyle = color;
+        ctx.fillRect(b.x, b.y, b.width, b.height);
+    }
+
+    drawEnemy(e: Enemy) {
+        const { ctx } = this;
+        ctx.fillStyle = '#ff7b72';
+        ctx.beginPath();
+        ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#00000055';
+        ctx.fillRect(e.x + 2, e.y + 2, e.width - 4, 3); // simple band
+    }
+
+    drawPowerUp(p: PowerUp) {
+        const { ctx } = this;
+        const colors: Record<string,string> = { heal: '#7ee787', rapid: '#f7b84a', shield: '#8b8efb' };
+        ctx.fillStyle = colors[p.type] || '#f7b84a';
+        ctx.beginPath();
+        ctx.roundRect(p.x, p.y, p.width, p.height, 4);
+        ctx.fill();
     }
 }

@@ -6,6 +6,9 @@ export class Player {
     vx = 0;
     vy = 0;
     private _score = 0;
+    hp: number = 3;
+    maxHp: number = 3;
+    fireCooldown: number = 0;
     name?: string;
 
     constructor(x: number = 50, y: number = 50, width: number = 28, height: number = 28, speed?: number) {
@@ -28,6 +31,7 @@ export class Player {
     update(dt: number) {
         this.x += this.vx * dt;
         this.y += this.vy * dt;
+    if (this.fireCooldown > 0) this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     }
 
     get score() {

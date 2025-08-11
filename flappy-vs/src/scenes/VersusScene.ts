@@ -110,7 +110,7 @@ export class VersusScene implements IScene {
         this.renderer.drawPlayer(this.p1, '#58a6ff');
         this.renderer.drawPlayer(this.p2, '#ff7b72');
     this.particles.render(ctx);
-        this.hud.render(ctx, this.s1, this.s2);
+    this.hud.render(ctx, this.s1, this.s2);
     ctx.restore();
         if (this.paused) {
             ctx.fillStyle = '#00000088';
