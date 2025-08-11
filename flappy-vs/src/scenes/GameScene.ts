@@ -10,6 +10,7 @@ import { mapPointerButtonToAction } from '../game/controls';
 import { Projectile } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { PowerUp } from '../entities/PowerUp';
+import { Scoreboard } from '../game/scoreboard';
 
 export class GameScene implements IScene {
     player = new Player(80, 150, 26, 26);
@@ -134,6 +135,7 @@ export class GameScene implements IScene {
                     this.gameOver = true;
                     this.best = Math.max(this.best, this.score);
                     try { localStorage.setItem('best', String(this.best)); } catch {}
+                    Scoreboard.addScore(this.score);
                 }
             }
         }
@@ -153,10 +155,32 @@ export class GameScene implements IScene {
         // Enemies and power-ups spawn
         this.enemyTimer -= dt;
         if (this.enemyTimer <= 0) {
+            // Try to spawn inside the latest pipe gap
+            let gapTop = 40, gapBottom = canvasH - 40;
+            if (this.obstacles.length >= 2) {
+                // choose the pair with the largest x (furthest right)
+                let bestIdx = 0;
+                let bestX = -Infinity;
+                for (let i = 0; i < this.obstacles.length - 1; i += 2) {
+                    const top = this.obstacles[i];
+                    if (top.x > bestX) { bestX = top.x; bestIdx = i; }
+                }
+                const top = this.obstacles[bestIdx];
+                const bottom = this.obstacles[bestIdx + 1];
+                gapTop = top.height;
+                gapBottom = bottom.y;
+            }
+            const margin = 12;
+            const minY = Math.max(0, gapTop + margin);
+            const maxY = Math.min(canvasH - 20, gapBottom - margin - 18);
             const ex = engine.canvas.width + 40;
-            const ey = 40 + Math.random() * (canvasH - 120);
+            const ey = (minY < maxY) ? (minY + (maxY - minY) * 0.5) : (40 + Math.random() * (canvasH - 120));
             const evx = - (120 + Math.random() * 60 + this.score);
-            this.enemies.push(new Enemy(ex, ey, evx, Math.sin(performance.now()/400 + Math.random()) * 10));
+            const e = new Enemy(ex, ey, evx, 0);
+            (e as any).minY = isFinite(minY) ? minY : 20;
+            (e as any).maxY = isFinite(maxY) ? maxY : canvasH - 40;
+            (e as any).phase = Math.random() * Math.PI * 2;
+            this.enemies.push(e);
             this.enemyTimer = 1.8 - Math.min(1.2, this.score * 0.01);
         }
         this.powerTimer -= dt;
@@ -169,7 +193,17 @@ export class GameScene implements IScene {
 
         // Update bullets/enemies/power-ups
         for (const b of this.bullets) b.update(dt);
-        for (const e of this.enemies) e.update(dt);
+        for (const e of this.enemies) {
+            // vertical oscillation constrained to spawn band
+            const phase = ((e as any).phase ?? 0) + performance.now() / 1000;
+            const amp = 35;
+            e.vy = Math.sin(phase) * amp;
+            e.update(dt);
+            const minY = (e as any).minY ?? 20;
+            const maxY = (e as any).maxY ?? (canvasH - 40);
+            if (e.y < minY) e.y = minY;
+            if (e.y + e.height > maxY) e.y = maxY - e.height;
+        }
         for (const p of this.powerUps) p.update(dt);
         this.bullets = this.bullets.filter(b => !b.isOffScreen(engine.canvas.width, canvasH) && b.active);
         this.enemies = this.enemies.filter(e => !e.isOffScreen());
@@ -201,6 +235,7 @@ export class GameScene implements IScene {
                 this.player.hp -= 1; Audio.hit(); this.particles.burst(e.x+e.width/2,e.y+e.height/2,10,'#ff7b72aa'); e.x = -9999;
                 if (this.player.hp <= 0) {
                     this.gameOver = true; this.best = Math.max(this.best, this.score); try { localStorage.setItem('best', String(this.best)); } catch {}
+                    Scoreboard.addScore(this.score);
                 }
             }
         }

@@ -2,6 +2,7 @@ import GameEngine, { IScene } from '../game/engine';
 import GameScene from './GameScene';
 import VersusScene from './VersusScene';
 import { Audio } from '../game/audio';
+import { Scoreboard } from '../game/scoreboard';
 
 export class TitleScene implements IScene {
     private t = 0;
@@ -16,7 +17,8 @@ export class TitleScene implements IScene {
         // Scene transitions and toggles
         if (engine.input.wasPressed('KeyS')) engine.setScene(new GameScene());
         if (engine.input.wasPressed('KeyV')) engine.setScene(new VersusScene());
-        if (engine.input.wasPressed('KeyM')) Audio.muted = !Audio.muted;
+    if (engine.input.wasPressed('KeyM')) Audio.muted = !Audio.muted;
+    if (engine.input.wasPressed('KeyC')) Scoreboard.clear();
 
         // Background gradient
         const { ctx } = engine;
@@ -79,6 +81,28 @@ export class TitleScene implements IScene {
         ctx.fillText('Versus: P1 = Arrows + Space • P2 = W (flap), S (nudge down)', 48, y);
         y += 28;
         ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Esc returns here`, 48, y);
+
+        // Top scores
+        const top = Scoreboard.getTop(5);
+        if (top.length) {
+            const boxW = 280;
+            const boxH = 28 + top.length * 22 + 16;
+            const bx = Math.max(w - boxW - 24, 24);
+            const by = 24;
+            ctx.fillStyle = '#0f172acc';
+            ctx.fillRect(bx, by, boxW, boxH);
+            ctx.fillStyle = '#cdd9e5';
+            ctx.font = '700 16px system-ui';
+            ctx.fillText('Top Scores', bx + 12, by + 20);
+            ctx.font = '500 14px system-ui';
+            for (let i = 0; i < top.length; i++) {
+                const s = top[i];
+                ctx.fillText(`${i + 1}. ${s.score}`, bx + 12, by + 44 + i * 22);
+            }
+            ctx.font = '400 12px system-ui';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText('Press C to clear', bx + 12, by + boxH - 10);
+        }
 
         // Pulse prompt
         const pulse = 0.5 + 0.5 * Math.sin(this.t * 3);
