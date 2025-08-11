@@ -50,15 +50,15 @@ jobs:
           path: dist
 
       - name: Deploy to Azure Static Web Apps
+        if: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN != '' }}
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: 38342d72ed4ef08b3f6a6cf5a4272cc337a5f491050a0095bb3deb792239b43302-39363260-cbaa-431c-97b4-638b10bde557010310308dc30110
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: 'upload'
           # Upload the already-built site from the downloaded artifact folder
           app_location: 'dist'
           skip_app_build: true
           skip_api_build: true
-          skip_deploy_on_missing_secrets: true
 
   close_pull_request:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -66,8 +66,8 @@ jobs:
     name: Close Azure Static Web Apps PR environment
     steps:
       - name: Close PR environment
+        if: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN != '' }}
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: 'close'
-          skip_deploy_on_missing_secrets: true
