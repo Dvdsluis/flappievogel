@@ -10,28 +10,30 @@ canvas.style.height = '100vh';
 
 const engine = new GameEngine(canvas);
 
-let current: any = 'title';
-const setTitle = () => {
-	current = 'title';
-	engine.setScene(new TitleScene());
-};
-const setSingle = () => {
-	current = 'single';
-	engine.setScene(new GameScene());
-};
-const setVersus = () => {
-	current = 'versus';
-	engine.setScene(new VersusScene());
+let current: 'title' | 'single' | 'versus' = 'title';
+const setScene = (mode: typeof current) => {
+	current = mode;
+	switch (mode) {
+		case 'title':
+			engine.setScene(new TitleScene());
+			break;
+		case 'single':
+			engine.setScene(new GameScene());
+			break;
+		case 'versus':
+			engine.setScene(new VersusScene());
+			break;
+	}
 };
 
-setTitle();
+setScene('title');
 
 window.addEventListener('keydown', (e) => {
 	if (current === 'title') {
-		if (e.code === 'KeyS') setSingle();
-		if (e.code === 'KeyV') setVersus();
+		if (e.code === 'KeyS') setScene('single');
+		if (e.code === 'KeyV') setScene('versus');
 	} else if (e.code === 'Escape') {
-		setTitle();
+		setScene('title');
 	}
 });
 

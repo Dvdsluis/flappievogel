@@ -8,7 +8,8 @@ export class Input {
             (e) => {
                 if (!this.down.has(e.code)) this.pressedThisFrame.add(e.code);
                 this.down.add(e.code);
-                if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) e.preventDefault();
+                const actionKeys = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'];
+                if (actionKeys.includes(e.code)) e.preventDefault();
             },
             { passive: false }
         );
@@ -19,9 +20,7 @@ export class Input {
         this.pressedThisFrame.clear();
     }
 
-    endFrame() {
-        // no-op kept for symmetry; pressed keys are cleared at beginFrame
-    }
+    endFrame() { /* symmetry with beginFrame */ }
 
     isDown(code: string) {
         return this.down.has(code);

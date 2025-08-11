@@ -46,19 +46,32 @@ export class GameScene implements IScene {
 
     init(engine: GameEngine): void {
         this.renderer = new Renderer(engine.canvas, engine.ctx);
+    // Reset core state
     this.obstacles = [];
     this.score = 0;
     this.timeToNext = 0;
     this.gameOver = false;
     this.paused = false;
     this.speed = 140;
+    // Reset player to visible starting position and defaults
+    this.player.x = 80;
+    this.player.y = 150;
+    this.player.vx = 0;
+    this.player.vy = 0;
     this.player.hp = this.player.maxHp = 3;
+    (this.player as any).fireCooldown = 0;
+    // Clear entities/effects/overlays
     this.bullets = [];
     this.enemies = [];
     this.powerUps = [];
     this.enemyTimer = 0;
     this.powerTimer = 5;
     this.hintT = 4;
+    this.shakeT = 0;
+    this.floats = [];
+    // Reset touch button states
+    this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
+    this.restartRect = null;
     // Helpers for on-screen touch buttons
     const updateButtonRects = () => {
         const w = engine.canvas.width, h = engine.canvas.height;

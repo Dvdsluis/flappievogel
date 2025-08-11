@@ -7,8 +7,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-  "outDir": "./dist",
-  "rootDir": ".",
+    "outDir": "./dist",
+    "rootDir": ".",
     "lib": ["ES2019", "DOM"],
     "baseUrl": "./src"
   },

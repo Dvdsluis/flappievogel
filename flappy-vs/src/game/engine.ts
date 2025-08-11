@@ -16,12 +16,12 @@ export class GameEngine {
     public input: Input;
 
     constructor(canvas: HTMLCanvasElement) {
-        this.canvas = canvas;
+    this.canvas = canvas;
     const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('2D context not available');
-        this.ctx = ctx;
+    if (!ctx) throw new Error('2D context not available');
+    this.ctx = ctx;
     this.input = new Input();
-        this.resizeToDisplay();
+    this.resizeToDisplay();
     }
 
     resizeToDisplay() {
@@ -51,10 +51,10 @@ export class GameEngine {
         if (!this.running || !this.scene) return;
         const dt = Math.min(1 / 30, (now - this.lastTime) / 1000);
         this.lastTime = now;
-    this.input.beginFrame();
+        this.input.beginFrame();
         this.scene.update(dt, this);
         this.scene.render(this.ctx, this);
-    this.input.endFrame?.();
+        this.input.endFrame();
         requestAnimationFrame(this.loop);
     };
 }
