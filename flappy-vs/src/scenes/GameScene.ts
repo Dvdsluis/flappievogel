@@ -11,6 +11,7 @@ import { Projectile } from '../entities/Projectile';
 import { Enemy } from '../entities/Enemy';
 import { PowerUp } from '../entities/PowerUp';
 import { Scoreboard } from '../game/scoreboard';
+import { Settings } from '../game/settings';
 
 export class GameScene implements IScene {
     player = new Player(80, 150, 26, 26);
@@ -31,6 +32,9 @@ export class GameScene implements IScene {
     powerUps: PowerUp[] = [];
     enemyTimer = 0;
     powerTimer = 5;
+    // Visual feedback for scoring
+    private floats: Array<{x:number,y:number,text:string,ttl:number,vy:number}> = [];
+    private static readonly KILL_POINTS = 2;
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -38,6 +42,7 @@ export class GameScene implements IScene {
     private btnRightDown = false;
     private btnShootDown = false;
     private btnRects: { left: {x:number,y:number,w:number,h:number}, right: {x:number,y:number,w:number,h:number}, shoot: {x:number,y:number,w:number,h:number} } | null = null;
+    private restartRect: {x:number,y:number,w:number,h:number} | null = null;
 
     init(engine: GameEngine): void {
         this.renderer = new Renderer(engine.canvas, engine.ctx);
@@ -65,6 +70,11 @@ export class GameScene implements IScene {
             shoot: { x: w - size - pad, y: h - size - pad, w: size, h: size },
         };
     };
+    const updateRestartRect = () => {
+        const w = engine.canvas.width, h = engine.canvas.height;
+        const size = Math.max(64, Math.min(120, Math.floor(Math.min(w, h) * 0.16)));
+        this.restartRect = { x: (w - size) / 2, y: h * 0.55, w: size, h: size };
+    };
     const hitBtn = (which: 'left'|'right'|'shoot', x:number, y:number) => {
         if (!this.btnRects) return false;
         const r = this.btnRects[which];
@@ -86,7 +96,41 @@ export class GameScene implements IScene {
         }
     };
     const onPointer = (e: PointerEvent | MouseEvent | TouchEvent) => {
-        if (this.gameOver) return;
+        // Game over: allow tapping the restart button
+        if (this.gameOver) {
+            if ((e as TouchEvent).touches !== undefined) {
+                updateRestartRect();
+                const te = e as TouchEvent;
+                const rect = engine.canvas.getBoundingClientRect();
+                const sx = engine.canvas.width / rect.width;
+                const sy = engine.canvas.height / rect.height;
+                for (let i = 0; i < te.touches.length; i++) {
+                    const t = te.touches.item(i)!;
+                    const x = (t.clientX - rect.left) * sx;
+                    const y = (t.clientY - rect.top) * sy;
+                    const r = this.restartRect!;
+                    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                        this.init(engine);
+                        return;
+                    }
+                }
+            } else {
+                // Pointer/click center area
+                updateRestartRect();
+                const r = this.restartRect!;
+                const pe = e as PointerEvent;
+                const rect = engine.canvas.getBoundingClientRect();
+                const sx = engine.canvas.width / rect.width;
+                const sy = engine.canvas.height / rect.height;
+                const x = (pe.clientX - rect.left) * sx;
+                const y = (pe.clientY - rect.top) * sy;
+                if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                    this.init(engine);
+                    return;
+                }
+            }
+            return;
+        }
         // Touch events are flap; pointer uses button mapping
         if ((e as TouchEvent).touches !== undefined) {
             const te = e as TouchEvent;
@@ -102,6 +146,25 @@ export class GameScene implements IScene {
                 }
                 return;
             }
+            // If touches are near the shoot corner, treat as shoot area to avoid accidental flap
+            const cw = engine.canvas.width, ch = engine.canvas.height;
+            const rect = engine.canvas.getBoundingClientRect();
+            const sx = cw / rect.width, sy = ch / rect.height;
+            let inShootCorner = false;
+            for (let i = 0; i < te.touches.length; i++) {
+                const t = te.touches.item(i)!;
+                const x = (t.clientX - rect.left) * sx;
+                const y = (t.clientY - rect.top) * sy;
+                if (x > cw * 0.7 && y > ch * 0.6) { inShootCorner = true; break; }
+            }
+            if (inShootCorner && this.player.fireCooldown === 0) {
+                const bx = this.player.x + this.player.width;
+                const by = this.player.y + this.player.height * 0.5 - 2;
+                this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
+                this.player.fireCooldown = 0.18;
+                Audio.beep(980, 0.05, 'square', 0.05);
+                return;
+            }
             const touches = te.touches?.length ?? 0;
             if (touches >= 2 && this.player.fireCooldown === 0) {
                 // two-finger shoot
@@ -112,7 +175,7 @@ export class GameScene implements IScene {
                 Audio.beep(980, 0.05, 'square', 0.05);
             } else {
                 Physics.jump(this.player); Audio.flap();
-                this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, 8, '#88ccff88');
+                this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, Settings.reducedMotion ? 4 : 8, '#88ccff88');
             }
             return;
         }
@@ -156,7 +219,7 @@ export class GameScene implements IScene {
         // Controls: flap (Space, ArrowUp, or W), left/right nudge (Arrows or A/D), shoot (J or Ctrl)
     if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp') || engine.input.wasPressed('KeyW')) {
             Physics.jump(this.player); Audio.flap();
-            this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, 8, '#88ccff88');
+            this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, Settings.reducedMotion ? 4 : 8, '#88ccff88');
         }
     if ((engine.input.isDown('KeyJ') || engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || this.btnShootDown) && this.player.fireCooldown === 0) {
             const bx = this.player.x + this.player.width;
@@ -203,8 +266,8 @@ export class GameScene implements IScene {
             if (Physics.checkCollision(this.player, o)) {
                 this.player.hp -= 1;
                 Audio.hit();
-                this.particles.burst(this.player.x + this.player.width/2, this.player.y + this.player.height/2, 12, '#ff7b72aa');
-                this.shakeT = 0.2;
+                this.particles.burst(this.player.x + this.player.width/2, this.player.y + this.player.height/2, Settings.reducedMotion ? 6 : 12, '#ff7b72aa');
+                this.shakeT = Settings.reducedMotion ? 0.0 : 0.2;
                 // brief invuln by pushing player left slightly
                 this.player.x -= 10;
                 if (this.player.hp <= 0) {
@@ -291,13 +354,20 @@ export class GameScene implements IScene {
             for (const e of this.enemies) {
                 if (!b.active) continue;
                 if (hitRect(b.x,b.y,b.width,b.height, e.x,e.y,e.width,e.height)) {
-                    b.active = true; // continue thru but mark enemy as hit
+                    // consume projectile on hit for clearer feedback
+                    b.active = false;
                     e.health -= 1;
-                    this.particles.burst(e.x + e.width/2, e.y + e.height/2, 8, '#ffd166aa');
+                    // small spark on hit
+                    this.particles.burst(e.x + e.width/2, e.y + e.height/2, Settings.reducedMotion ? 6 : 10, '#ffd166aa');
                     if (e.health <= 0) {
-                        // remove enemy and score
+                        // enemy destroyed: bigger explosion + kill score + shake
+                        const cx = e.x + e.width/2, cy = e.y + e.height/2;
+                        this.particles.burst(cx, cy, Settings.reducedMotion ? 10 : 22, '#ffb347aa');
+                        this.particles.burst(cx, cy, Settings.reducedMotion ? 8 : 14, '#ff7b72aa');
                         e.x = -9999; // flagged; filtered later
-                        this.score += 1;
+                        this.score += GameScene.KILL_POINTS;
+                        this.floats.push({ x: cx, y: cy, text: `+${GameScene.KILL_POINTS}`, ttl: 0.9, vy: -32 });
+                        this.shakeT = Settings.reducedMotion ? 0.0 : Math.max(this.shakeT, 0.12);
                         Audio.score();
                     }
                 }
@@ -330,6 +400,9 @@ export class GameScene implements IScene {
     // Particles update & camera shake timer
         this.particles.update(dt);
         this.shakeT = Math.max(0, this.shakeT - dt);
+    // Floating texts update
+    for (const f of this.floats) { f.ttl -= dt; f.y += f.vy * dt; }
+    this.floats = this.floats.filter(f => f.ttl > 0);
     this.hintT = Math.max(0, this.hintT - dt);
     }
 
@@ -345,6 +418,18 @@ export class GameScene implements IScene {
     for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
         this.hud.render(ctx, this.score, undefined, this.player.hp);
+        // Floating texts render
+        if (this.floats.length) {
+            for (const f of this.floats) {
+                const a = Math.max(0, Math.min(1, f.ttl / 0.9));
+                ctx.save();
+                ctx.globalAlpha = a;
+                ctx.fillStyle = '#ffd166';
+                ctx.font = '700 18px system-ui';
+                ctx.fillText(f.text, f.x, f.y);
+                ctx.restore();
+            }
+        }
         // On-screen buttons for touch devices
         if (this.isTouch) {
             // Ensure rects are up-to-date with current canvas size
@@ -403,7 +488,25 @@ export class GameScene implements IScene {
             ctx.font = '700 28px system-ui';
             ctx.fillText(`Game Over — Score ${this.score}  Best ${this.best}`, 40, 120);
             ctx.font = '500 18px system-ui';
-            ctx.fillText('Press R to restart or Esc for Title', 40, 160);
+            ctx.fillText('Press R or tap the restart button', 40, 160);
+            // Draw restart button (touch)
+            const w = engine.canvas.width, h = engine.canvas.height;
+            const size = Math.max(64, Math.min(120, Math.floor(Math.min(w, h) * 0.16)));
+            const rx = (w - size) / 2, ry = h * 0.55;
+            this.restartRect = { x: rx, y: ry, w: size, h: size };
+            ctx.save();
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = '#0f172a';
+            ctx.strokeStyle = '#58a6ff88';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, size, size, 18);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#e8e8f0';
+            ctx.font = '700 28px system-ui';
+            ctx.fillText('⟲', rx + size/2 - 10, ry + size/2 + 12);
+            ctx.restore();
         }
     }
 }

@@ -3,6 +3,7 @@ import GameScene from './GameScene';
 import VersusScene from './VersusScene';
 import { Audio } from '../game/audio';
 import { Scoreboard } from '../game/scoreboard';
+import { Settings } from '../game/settings';
 
 export class TitleScene implements IScene {
     private t = 0;
@@ -51,6 +52,7 @@ export class TitleScene implements IScene {
         if (engine.input.wasPressed('KeyS')) engine.setScene(new GameScene());
         if (engine.input.wasPressed('KeyV')) engine.setScene(new VersusScene());
     if (engine.input.wasPressed('KeyM')) Audio.muted = !Audio.muted;
+    if (engine.input.wasPressed('KeyR')) Settings.toggleReducedMotion();
     if (engine.input.wasPressed('KeyC')) Scoreboard.clear();
 
         // Background gradient
@@ -118,7 +120,7 @@ export class TitleScene implements IScene {
         y += 28;
         ctx.fillText('Versus: P1 = Arrows + Space • P2 = W (flap), S (nudge down)', 48, y);
         y += 28;
-        ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Esc returns here`, 48, y);
+    ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, 48, y);
 
         // Top scores
         const top = Scoreboard.getTop(5);
