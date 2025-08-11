@@ -31,6 +31,8 @@ export class GameScene implements IScene {
     powerUps: PowerUp[] = [];
     enemyTimer = 0;
     powerTimer = 5;
+    // Mobile support
+    private mobileMoveX = 0; // -1..1 from touch zones
 
     init(engine: GameEngine): void {
         this.renderer = new Renderer(engine.canvas, engine.ctx);
@@ -51,7 +53,19 @@ export class GameScene implements IScene {
         if (this.gameOver) return;
         // Touch events are flap; pointer uses button mapping
         if ((e as TouchEvent).touches !== undefined) {
-            Physics.jump(this.player); Audio.flap();
+            const te = e as TouchEvent;
+            const touches = te.touches?.length ?? 0;
+            if (touches >= 2 && this.player.fireCooldown === 0) {
+                // two-finger shoot
+                const bx = this.player.x + this.player.width;
+                const by = this.player.y + this.player.height * 0.5 - 2;
+                this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
+                this.player.fireCooldown = 0.18;
+                Audio.beep(980, 0.05, 'square', 0.05);
+            } else {
+                Physics.jump(this.player); Audio.flap();
+                this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, 8, '#88ccff88');
+            }
             return;
         }
         const btn = (e as PointerEvent).button ?? 0;
@@ -67,8 +81,21 @@ export class GameScene implements IScene {
         }
     };
     engine.canvas.oncontextmenu = (e) => { e.preventDefault(); };
-    engine.canvas.ontouchstart = onPointer as any;
     engine.canvas.onpointerdown = onPointer as any;
+    // Touch controls: flap (single), shoot (two-finger), hold left/right halves to move
+    const calcMobileMove = (te: TouchEvent) => {
+        const rect = engine.canvas.getBoundingClientRect();
+        let left = 0, right = 0;
+        for (let i = 0; i < te.touches.length; i++) {
+            const t = te.touches.item(i)!;
+            const x = t.clientX - rect.left;
+            if (x < rect.width * 0.45) left = 1; else if (x > rect.width * 0.55) right = 1;
+        }
+        this.mobileMoveX = right - left; // -1, 0, or 1
+    };
+    engine.canvas.ontouchstart = (te: TouchEvent) => { calcMobileMove(te); onPointer(te); };
+    engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); };
+    engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); };
     try { const b = localStorage.getItem('best'); if (b) this.best = parseInt(b, 10) || 0; } catch {}
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.paused = true; });
     }
@@ -92,7 +119,7 @@ export class GameScene implements IScene {
         }
     const dir = engine.input.getMovementDirection();
     const wasdX = engine.input.getWASDHorizontal?.() ?? ((engine.input.isDown('KeyD') ? 1 : 0) + (engine.input.isDown('KeyA') ? -1 : 0));
-    this.player.vx = (dir.x + wasdX) * 80;
+    this.player.vx = (dir.x + wasdX + this.mobileMoveX) * 80;
         Physics.applyGravity(this.player, dt);
         this.player.update(dt);
 

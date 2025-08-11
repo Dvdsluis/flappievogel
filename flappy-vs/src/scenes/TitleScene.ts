@@ -110,7 +110,7 @@ export class TitleScene implements IScene {
         ctx.globalAlpha = 0.6 + 0.4 * pulse;
         ctx.fillStyle = '#58a6ff';
         ctx.font = '700 18px system-ui';
-        ctx.fillText('Press S or V to start — Click/Tap flaps', 40, h - 60);
+    ctx.fillText('Press S or V to start — Tap to flap, two-finger tap to shoot', 40, h - 60);
         ctx.restore();
     }
     render(): void {}
