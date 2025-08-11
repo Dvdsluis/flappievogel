@@ -11,6 +11,39 @@ export class TitleScene implements IScene {
     }
     init(engine: GameEngine): void {
         engine.canvas.focus();
+        // Mobile-friendly: tap to start Singleplayer, two-finger tap for Versus
+        let started = false;
+        const cleanup = () => {
+            engine.canvas.onpointerdown = null;
+            engine.canvas.ontouchstart = null;
+            engine.canvas.onclick = null;
+            document.removeEventListener('touchstart', onDocTouchStart as any);
+            document.removeEventListener('pointerdown', onDocPointerDown as any);
+            document.removeEventListener('click', onDocClick as any);
+        };
+        const startNow = (versus: boolean) => {
+            if (started) return; started = true; cleanup();
+            engine.setScene(versus ? new VersusScene() : new GameScene());
+        };
+        const onPointerDown = (e: PointerEvent) => startNow(false);
+        const onTouchStart = (e: TouchEvent) => {
+            const touches = e.touches?.length ?? 0;
+            startNow(touches >= 2);
+        };
+        const onClick = (e: MouseEvent) => startNow(false);
+        const onDocPointerDown = (e: PointerEvent) => startNow(false);
+        const onDocTouchStart = (e: TouchEvent) => {
+            const touches = e.touches?.length ?? 0;
+            startNow(touches >= 2);
+        };
+        const onDocClick = (e: MouseEvent) => startNow(false);
+
+        engine.canvas.onpointerdown = onPointerDown as any;
+        engine.canvas.ontouchstart = onTouchStart as any;
+        engine.canvas.onclick = onClick as any;
+        document.addEventListener('pointerdown', onDocPointerDown, { passive: true });
+        document.addEventListener('touchstart', onDocTouchStart, { passive: true });
+        document.addEventListener('click', onDocClick, { passive: true });
     }
     update(dt: number, engine: GameEngine): void {
         this.t += dt;
@@ -46,15 +79,20 @@ export class TitleScene implements IScene {
         ctx.fillStyle = '#e8e8f0';
         ctx.font = '800 64px system-ui, ui-sans-serif, -apple-system, Segoe UI';
         ctx.textBaseline = 'top';
-        ctx.fillText('Flappy VS', 40, 80 + bob);
+    ctx.fillText('Crappy Bird Extreme', 40, 80 + bob);
 
         // Accent underline
         ctx.strokeStyle = '#58a6ff';
         ctx.lineWidth = 6;
         ctx.beginPath();
-        ctx.moveTo(40, 80 + bob + 64 + 8);
-        ctx.lineTo(280, 80 + bob + 64 + 8);
+    ctx.moveTo(40, 80 + bob + 64 + 8);
+    ctx.lineTo(520, 80 + bob + 64 + 8);
         ctx.stroke();
+
+    // Subtitle
+    ctx.font = '700 20px system-ui';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('yoloswag edition', 44, 80 + bob + 64 + 18 + 10);
 
         // Cards with options
         ctx.fillStyle = '#0f172a88';
@@ -110,7 +148,7 @@ export class TitleScene implements IScene {
         ctx.globalAlpha = 0.6 + 0.4 * pulse;
         ctx.fillStyle = '#58a6ff';
         ctx.font = '700 18px system-ui';
-    ctx.fillText('Press S or V to start — Tap to flap, two-finger tap to shoot', 40, h - 60);
+    ctx.fillText('Tap to start Singleplayer • Two-finger tap for Versus (or press S/V)', 40, h - 60);
         ctx.restore();
     }
     render(): void {}

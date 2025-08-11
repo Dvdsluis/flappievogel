@@ -33,6 +33,11 @@ export class GameScene implements IScene {
     powerTimer = 5;
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
+    private isTouch = 'ontouchstart' in window;
+    private btnLeftDown = false;
+    private btnRightDown = false;
+    private btnShootDown = false;
+    private btnRects: { left: {x:number,y:number,w:number,h:number}, right: {x:number,y:number,w:number,h:number}, shoot: {x:number,y:number,w:number,h:number} } | null = null;
 
     init(engine: GameEngine): void {
         this.renderer = new Renderer(engine.canvas, engine.ctx);
@@ -49,11 +54,54 @@ export class GameScene implements IScene {
     this.enemyTimer = 0;
     this.powerTimer = 5;
     this.hintT = 4;
+    // Helpers for on-screen touch buttons
+    const updateButtonRects = () => {
+        const w = engine.canvas.width, h = engine.canvas.height;
+        const size = Math.max(60, Math.min(120, Math.floor(Math.min(w, h) * 0.14)));
+        const pad = 24;
+        this.btnRects = {
+            left:  { x: pad, y: h - size - pad, w: size, h: size },
+            right: { x: pad + size + 16, y: h - size - pad, w: size, h: size },
+            shoot: { x: w - size - pad, y: h - size - pad, w: size, h: size },
+        };
+    };
+    const hitBtn = (which: 'left'|'right'|'shoot', x:number, y:number) => {
+        if (!this.btnRects) return false;
+        const r = this.btnRects[which];
+        return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    };
+    const recomputeTouchButtons = (te: TouchEvent) => {
+        updateButtonRects();
+        this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
+        const rect = engine.canvas.getBoundingClientRect();
+        const sx = engine.canvas.width / rect.width;
+        const sy = engine.canvas.height / rect.height;
+        for (let i = 0; i < te.touches.length; i++) {
+            const t = te.touches.item(i)!;
+            const x = (t.clientX - rect.left) * sx;
+            const y = (t.clientY - rect.top) * sy;
+            if (hitBtn('left', x, y)) this.btnLeftDown = true;
+            else if (hitBtn('right', x, y)) this.btnRightDown = true;
+            else if (hitBtn('shoot', x, y)) this.btnShootDown = true;
+        }
+    };
     const onPointer = (e: PointerEvent | MouseEvent | TouchEvent) => {
         if (this.gameOver) return;
         // Touch events are flap; pointer uses button mapping
         if ((e as TouchEvent).touches !== undefined) {
             const te = e as TouchEvent;
+            recomputeTouchButtons(te);
+            if (this.btnLeftDown || this.btnRightDown || this.btnShootDown) {
+                // Button touches: shoot if pressed, otherwise movement is handled elsewhere
+                if (this.btnShootDown && this.player.fireCooldown === 0) {
+                    const bx = this.player.x + this.player.width;
+                    const by = this.player.y + this.player.height * 0.5 - 2;
+                    this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
+                    this.player.fireCooldown = 0.18;
+                    Audio.beep(980, 0.05, 'square', 0.05);
+                }
+                return;
+            }
             const touches = te.touches?.length ?? 0;
             if (touches >= 2 && this.player.fireCooldown === 0) {
                 // two-finger shoot
@@ -82,7 +130,7 @@ export class GameScene implements IScene {
     };
     engine.canvas.oncontextmenu = (e) => { e.preventDefault(); };
     engine.canvas.onpointerdown = onPointer as any;
-    // Touch controls: flap (single), shoot (two-finger), hold left/right halves to move
+    // Touch controls: on-screen buttons + zones
     const calcMobileMove = (te: TouchEvent) => {
         const rect = engine.canvas.getBoundingClientRect();
         let left = 0, right = 0;
@@ -94,8 +142,8 @@ export class GameScene implements IScene {
         this.mobileMoveX = right - left; // -1, 0, or 1
     };
     engine.canvas.ontouchstart = (te: TouchEvent) => { calcMobileMove(te); onPointer(te); };
-    engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); };
-    engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); };
+    engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); recomputeTouchButtons(te); };
+    engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); recomputeTouchButtons(te); };
     try { const b = localStorage.getItem('best'); if (b) this.best = parseInt(b, 10) || 0; } catch {}
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.paused = true; });
     }
@@ -110,7 +158,7 @@ export class GameScene implements IScene {
             Physics.jump(this.player); Audio.flap();
             this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, 8, '#88ccff88');
         }
-    if ((engine.input.isDown('KeyJ') || engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight')) && this.player.fireCooldown === 0) {
+    if ((engine.input.isDown('KeyJ') || engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || this.btnShootDown) && this.player.fireCooldown === 0) {
             const bx = this.player.x + this.player.width;
             const by = this.player.y + this.player.height * 0.5 - 2;
             this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
@@ -119,7 +167,8 @@ export class GameScene implements IScene {
         }
     const dir = engine.input.getMovementDirection();
     const wasdX = engine.input.getWASDHorizontal?.() ?? ((engine.input.isDown('KeyD') ? 1 : 0) + (engine.input.isDown('KeyA') ? -1 : 0));
-    this.player.vx = (dir.x + wasdX + this.mobileMoveX) * 80;
+    const btnX = (this.btnRightDown ? 1 : 0) - (this.btnLeftDown ? 1 : 0);
+    this.player.vx = (dir.x + wasdX + this.mobileMoveX + btnX) * 80;
         Physics.applyGravity(this.player, dt);
         this.player.update(dt);
 
@@ -296,6 +345,38 @@ export class GameScene implements IScene {
     for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
         this.hud.render(ctx, this.score, undefined, this.player.hp);
+        // On-screen buttons for touch devices
+        if (this.isTouch) {
+            // Ensure rects are up-to-date with current canvas size
+            const w = engine.canvas.width, h = engine.canvas.height;
+            const size = Math.max(60, Math.min(120, Math.floor(Math.min(w, h) * 0.14)));
+            const pad = 24;
+            this.btnRects = {
+                left:  { x: pad, y: h - size - pad, w: size, h: size },
+                right: { x: pad + size + 16, y: h - size - pad, w: size, h: size },
+                shoot: { x: w - size - pad, y: h - size - pad, w: size, h: size },
+            };
+            const drawBtn = (r:{x:number,y:number,w:number,h:number}, active:boolean, label: 'L'|'R'|'S') => {
+                ctx.save();
+                ctx.globalAlpha = 0.5;
+                ctx.fillStyle = active ? '#58a6ff' : '#0f172a';
+                ctx.strokeStyle = '#58a6ff88';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.roundRect(r.x, r.y, r.w, r.h, 16);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#e8e8f0';
+                ctx.font = '700 28px system-ui';
+                const glyph = label === 'L' ? '\u25C0' : (label === 'R' ? '\u25B6' : '\u25CF');
+                const tw = ctx.measureText(glyph).width;
+                ctx.fillText(glyph, r.x + (r.w - tw) / 2, r.y + r.h / 2 + 10);
+                ctx.restore();
+            };
+            drawBtn(this.btnRects.left, this.btnLeftDown, 'L');
+            drawBtn(this.btnRects.right, this.btnRightDown, 'R');
+            drawBtn(this.btnRects.shoot, this.btnShootDown, 'S');
+        }
         if (this.hintT > 0) {
             const a = Math.min(0.8, this.hintT / 4);
             ctx.save();
