@@ -9,6 +9,7 @@ import { Particles } from '../game/particles';
 import { PowerUp, type PowerType } from '../entities/PowerUp';
 import { Projectile } from '../entities/Projectile';
 import { POWERUPS, pickPowerUp } from '../game/powerups';
+import { mapPointerButtonToAction } from '../game/controls';
 import { Realtime, RTMessage } from '../net/realtime';
 
 export class VersusOnline implements IScene {
@@ -30,6 +31,9 @@ export class VersusOnline implements IScene {
   bigshotUntil = 0;
   slowmoUntil = 0;
   magnetUntil = 0;
+  // mobile helpers
+  private isTouch = 'ontouchstart' in window;
+  private mobileMoveX = 0; // -1..1 from screen halves
   // net smoothing
   private remoteHistory: Array<{t:number,x:number,y:number,vy:number,score:number,hp:number,name?:string}> = [];
   private sendAccum = 0; // throttle to ~25Hz
@@ -144,6 +148,64 @@ export class VersusOnline implements IScene {
       try { this.rt?.send({ type: 'leave', id: myId, roomId: this.roomId }); } catch {}
     };
     window.addEventListener('beforeunload', this.unloadHandler);
+
+    // Pointer controls: Left-click = flap, Right-click = shoot
+    const onPointer = (e: PointerEvent) => {
+      // Prevent default for context menu on canvas
+      if (e.button === 2) e.preventDefault();
+      const act = mapPointerButtonToAction(e.button ?? 0);
+      if (act === 'flap') {
+        Physics.jump(this.p1); Audio.flap();
+        this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
+      } else if (act === 'shoot') {
+        const baseCd = 0.35;
+        if (this.p1.fireCooldown <= 0) {
+          this.fireBullet(this.p1, 'p1', engine);
+          this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
+        }
+      }
+    };
+    engine.canvas.onpointerdown = onPointer as any;
+    engine.canvas.oncontextmenu = (e) => { e.preventDefault(); };
+
+    // Touch controls: tap = flap, two-finger or bottom-right corner = shoot, screen halves for left/right nudge
+    const calcMobileMove = (te: TouchEvent) => {
+      const rect = engine.canvas.getBoundingClientRect();
+      let left = 0, right = 0;
+      for (let i = 0; i < te.touches.length; i++) {
+        const t = te.touches.item(i)!;
+        const x = t.clientX - rect.left;
+        if (x < rect.width * 0.45) left = 1; else if (x > rect.width * 0.55) right = 1;
+      }
+      this.mobileMoveX = right - left;
+    };
+    const onTouch = (te: TouchEvent) => {
+      // Shooting if two fingers, or a touch in the bottom-right corner
+      const cw = engine.canvas.width, ch = engine.canvas.height;
+      const rect = engine.canvas.getBoundingClientRect();
+      const sx = cw / rect.width, sy = ch / rect.height;
+      let inShootCorner = false;
+      for (let i = 0; i < te.touches.length; i++) {
+        const t = te.touches.item(i)!;
+        const x = (t.clientX - rect.left) * sx;
+        const y = (t.clientY - rect.top) * sy;
+        if (x > cw * 0.7 && y > ch * 0.6) { inShootCorner = true; break; }
+      }
+      if (te.touches.length >= 2 || inShootCorner) {
+        const baseCd = 0.35;
+        if (this.p1.fireCooldown <= 0) {
+          this.fireBullet(this.p1, 'p1', engine);
+          this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
+        }
+        return;
+      }
+      // Otherwise tap = flap
+      Physics.jump(this.p1); Audio.flap();
+      this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
+    };
+    engine.canvas.ontouchstart = (te: TouchEvent) => { calcMobileMove(te); onTouch(te); };
+    engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); };
+    engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); };
   }
 
   dispose(): void {
@@ -239,7 +301,9 @@ export class VersusOnline implements IScene {
       // Spark burst on flap
       this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
     }
-    const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
+  const dir = engine.input.getMovementDirection();
+  const wasdX = (engine.input as any).getWASDHorizontal ? (engine.input as any).getWASDHorizontal() : 0;
+  this.p1.vx = (dir.x + wasdX + this.mobileMoveX) * 80;
     // shooting
     const baseCd = 0.35; // seconds
     if (engine.input.wasPressed('ShiftLeft') || engine.input.wasPressed('KeyF')) {
