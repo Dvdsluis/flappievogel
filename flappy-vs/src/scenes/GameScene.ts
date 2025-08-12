@@ -47,6 +47,7 @@ export class GameScene implements IScene {
     private slowmoT = 0;    // world slow factor active
     private magnetT = 0;    // attract powerups
     private rapidT = 0;     // reduce fire cooldown
+    private pickupBadgeT = 0; // brief on-screen badges after pickup
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -228,17 +229,22 @@ export class GameScene implements IScene {
         if (this.player.fireCooldown > 0) return;
         const bx = this.player.x + this.player.width;
         const by = this.player.y + this.player.height * 0.5 - 2;
-        const mk = (dx:number, dy:number) => {
-            const p = new Projectile(bx, by + dy, 360, dx, 'player');
-            if (this.bigshotT > 0) { p.width = 14; p.damage = 2; }
+        const mkAngle = (angleRad:number) => {
+            const speed = 360;
+            const vx = Math.cos(angleRad) * speed;
+            const vy = Math.sin(angleRad) * speed;
+            const p = new Projectile(bx, by, vx, vy, 'player');
+            if (this.bigshotT > 0) { p.width = 14; p.damage = 2; p.color = '#ffa6a6'; }
             return p;
         };
     if (this.multishotT > 0) {
-            this.bullets.push(mk(-40, -4));
-            this.bullets.push(mk(  0,  0));
-            this.bullets.push(mk( 40,  4));
+            const base = 0; // radians, 0 = to the right
+            const spread = 0.13; // ~7.5 degrees
+            this.bullets.push(mkAngle(base - spread));
+            this.bullets.push(mkAngle(base));
+            this.bullets.push(mkAngle(base + spread));
         } else {
-            this.bullets.push(mk(0, 0));
+            this.bullets.push(mkAngle(0));
         }
     let cd = this.bigshotT>0 ? 0.22 : (this.multishotT>0 ? 0.2 : 0.18);
     if (this.rapidT > 0) cd = Math.max(0.08, cd * 0.55);
@@ -410,7 +416,12 @@ export class GameScene implements IScene {
                 const dx = cx - (p.x + p.width/2);
                 const dy = cy - (p.y + p.height/2);
                 const d2 = dx*dx + dy*dy;
-                if (d2 < 200*200) { p.vx += Math.sign(dx) * 20; p.vy += Math.sign(dy) * 20; }
+                if (d2 < 200*200) {
+                    p.vx += Math.sign(dx) * 20; p.vy += Math.sign(dy) * 20;
+                    if (!Settings.reducedMotion && Math.random() < 0.25) {
+                        this.particles.burst(p.x + p.width/2, p.y + p.height/2, 1, '#f472b6aa');
+                    }
+                }
             }
             p.update(gdt);
         }
@@ -469,10 +480,11 @@ export class GameScene implements IScene {
                 if (p.type === 'shield') { this.player.maxHp = Math.min(5, this.player.maxHp + 1); this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1); }
                 if (p.type === 'multishot') this.multishotT = Math.max(this.multishotT, 8);
                 if (p.type === 'bigshot') this.bigshotT = Math.max(this.bigshotT, 8);
-                if (p.type === 'slowmo') this.slowmoT = Math.max(this.slowmoT, 4);
+                if (p.type === 'slowmo') this.slowmoT = Math.max(this.slowmoT, 3.5);
                 if (p.type === 'magnet') this.magnetT = Math.max(this.magnetT, 8);
                 this.particles.burst(p.x+p.width/2,p.y+p.height/2,14,'#7ee787aa');
                 p.x = -9999;
+                this.pickupBadgeT = 1.4;
             }
         }
 
@@ -538,30 +550,73 @@ export class GameScene implements IScene {
         this.hud.render(ctx, this.score, undefined, this.player.hp);
         // Tiny icons for active power-ups next to hearts
         {
-            const iconList: Array<{active:boolean,color:string,glyph:string}> = [
-                { active: this.rapidT > 0,     color: '#f7b84a', glyph: 'R' },
-                { active: this.multishotT > 0, color: '#38bdf8', glyph: 'M' },
-                { active: this.bigshotT > 0,   color: '#fb7185', glyph: 'B' },
-                { active: this.slowmoT > 0,    color: '#a78bfa', glyph: '⌛' },
-                { active: this.magnetT > 0,    color: '#f472b6', glyph: 'U' },
+            type Icon = {active:boolean,color:string,glyph:string, rem:number, dur:number};
+            const iconList: Icon[] = [
+                { active: this.rapidT > 0,     color: '#f7b84a', glyph: 'R', rem: this.rapidT, dur: 8 },
+                { active: this.multishotT > 0, color: '#38bdf8', glyph: 'M', rem: this.multishotT, dur: 8 },
+                { active: this.bigshotT > 0,   color: '#fb7185', glyph: 'B', rem: this.bigshotT, dur: 8 },
+                { active: this.slowmoT > 0,    color: '#a78bfa', glyph: '⌛', rem: this.slowmoT, dur: 3.5 },
+                { active: this.magnetT > 0,    color: '#f472b6', glyph: 'U', rem: this.magnetT, dur: 8 },
             ];
             const hp = this.player.hp ?? 0;
-            let x = 16 + hp * 18 + 12; // after hearts row
-            const y = 36; // hearts baseline
+            const startX = 16 + hp * 18 + 12; // after hearts row
+            let x = startX; let y = 36; // hearts baseline
+            const w = 12, h = 12, r = 3, pad = 6;
+            const maxX = (engine.canvas.width - 16);
             for (const a of iconList) {
                 if (!a.active) continue;
+                if (x + w > maxX) { x = startX; y += h + 6; }
                 ctx.save();
                 ctx.globalAlpha = 0.95;
-                const w = 12, h = 12, r = 3;
                 ctx.fillStyle = a.color;
                 ctx.beginPath(); ctx.roundRect(x, y + 2, w, h, r); ctx.fill();
+                // countdown arc
+                const frac = Math.max(0, Math.min(1, a.rem / a.dur));
+                ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(x + w/2, y + 2 + h/2, 6, -Math.PI/2, -Math.PI/2 + frac * Math.PI * 2);
+                ctx.stroke();
+                // glyph
                 ctx.fillStyle = '#0f172a';
                 ctx.font = '700 9px system-ui';
                 const tw = ctx.measureText(a.glyph).width;
                 ctx.fillText(a.glyph, x + (w - tw) / 2, y + 11);
                 ctx.restore();
-                x += w + 6;
+                x += w + pad;
             }
+        }
+        // Transient pickup badges (fade out)
+        if (this.pickupBadgeT > 0) {
+            const a = Math.min(1, this.pickupBadgeT / 1.4);
+            ctx.save();
+            ctx.globalAlpha = a * 0.9;
+            const badges: Array<{label:string, active:boolean, color:string}> = [
+                { label: 'Rapid', active: this.rapidT > 0, color: '#f7b84a' },
+                { label: 'Multi', active: this.multishotT > 0, color: '#38bdf8' },
+                { label: 'Big',   active: this.bigshotT > 0, color: '#fb7185' },
+                { label: 'Slow',  active: this.slowmoT > 0, color: '#a78bfa' },
+                { label: 'Mag',   active: this.magnetT > 0, color: '#f472b6' },
+            ].filter(b => b.active);
+            let bx = 16, by = 56 + 26; // below HUD line
+            for (const b of badges) {
+                const w = 86, h = 22, r = 8;
+                ctx.fillStyle = '#0f172acc';
+                ctx.beginPath(); ctx.roundRect(bx, by, w, h, r); ctx.fill();
+                ctx.fillStyle = b.color + 'dd';
+                ctx.beginPath(); ctx.roundRect(bx+2, by+2, w-4, h-4, 6); ctx.strokeStyle = b.color + '66'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = '#e8e8f0'; ctx.font = '700 12px system-ui';
+                ctx.fillText(b.label, bx + 10, by + 15);
+                bx += w + 8;
+            }
+            ctx.restore();
+        }
+        // Slowmo vignette when active
+        if (this.slowmoT > 0) {
+            const a = Math.min(0.25, 0.15 + (this.slowmoT / 4) * 0.1);
+            ctx.save();
+            ctx.globalAlpha = a;
+            ctx.fillStyle = '#0b1022';
+            ctx.fillRect(0, 0, engine.canvas.width, engine.canvas.height);
+            ctx.restore();
         }
         // Active power-up badges with timers
         const badges: Array<{label:string, t:number, d:number, color:string}> = [];

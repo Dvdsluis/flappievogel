@@ -115,7 +115,7 @@ export class Renderer {
 
     drawProjectile(b: Projectile, color: string = '#ffd166') {
         const { ctx } = this;
-        ctx.fillStyle = color;
+        ctx.fillStyle = b.color || color;
         ctx.fillRect(b.x, b.y, b.width, b.height);
     }
 
