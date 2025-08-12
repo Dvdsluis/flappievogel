@@ -32,6 +32,7 @@ export class GameScene implements IScene {
     powerUps: PowerUp[] = [];
     enemyTimer = 0;
     powerTimer = 5;
+    private lastGapCenter: number | null = null;
     // Visual feedback for scoring
     private floats: Array<{x:number,y:number,text:string,ttl:number,vy:number}> = [];
     private static readonly KILL_POINTS = 2;
@@ -69,6 +70,7 @@ export class GameScene implements IScene {
     this.hintT = 4;
     this.shakeT = 0;
     this.floats = [];
+    this.lastGapCenter = null;
     // Reset touch button states
     this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
     this.restartRect = null;
@@ -257,12 +259,21 @@ export class GameScene implements IScene {
             // Progressive difficulty: start slow/wide, ramp up gently
             const progress = Math.min(1, this.score / 30); // 0..1 over first ~30 points
             this.speed = Math.min(280, 120 + progress * 140);
-            const dynGap = Math.max(140, 220 - this.score * 2.2); // never below 140
+            const dynGap = Math.max(150, 230 - this.score * 2.2); // never below 150
             this.timeToNext = Math.max(1.1, 1.8 - this.score * 0.02);
             const gap = dynGap;
-            const minTop = 40;
-            const maxTop = canvasH - gap - 40;
-            const topHeight = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
+            const margin = 60; // keep away from extremes for fairness
+            // Allowed center range for the gap
+            const minCenter = margin + gap / 2;
+            const maxCenter = canvasH - margin - gap / 2;
+            // Limit how much the gap center can move between pipes
+            const lastC = (this.lastGapCenter ?? (canvasH / 2));
+            const maxStep = 140 + Math.min(100, this.score * 2); // ramps 140..240
+            const low = Math.max(minCenter, lastC - maxStep);
+            const high = Math.min(maxCenter, lastC + maxStep);
+            const center = low <= high ? (low + Math.random() * (high - low)) : Math.min(maxCenter, Math.max(minCenter, lastC));
+            const topHeight = Math.floor(center - gap / 2);
+            this.lastGapCenter = center;
             const pipeW = 80;
             const x = engine.canvas.width + pipeW;
             // Represent pipes as two obstacles: top and bottom
