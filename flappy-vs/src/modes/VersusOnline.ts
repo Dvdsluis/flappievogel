@@ -6,6 +6,9 @@ import { Renderer } from '../game/renderer';
 import { Physics } from '../game/physics';
 import { Audio } from '../game/audio';
 import { Particles } from '../game/particles';
+import { PowerUp, type PowerType } from '../entities/PowerUp';
+import { Projectile } from '../entities/Projectile';
+import { POWERUPS, pickPowerUp } from '../game/powerups';
 import { Realtime, RTMessage } from '../net/realtime';
 
 export class VersusOnline implements IScene {
@@ -19,6 +22,14 @@ export class VersusOnline implements IScene {
   rt: Realtime | null = null;
   roomId: string;
   name: string;
+  // gameplay extras
+  bullets: Projectile[] = [];
+  enemyBullets: Projectile[] = [];
+  powerups: PowerUp[] = [];
+  multishotUntil = 0;
+  bigshotUntil = 0;
+  slowmoUntil = 0;
+  magnetUntil = 0;
   // net smoothing
   private remoteHistory: Array<{t:number,x:number,y:number,vy:number,score:number,hp:number,name?:string}> = [];
   private sendAccum = 0; // throttle to ~25Hz
@@ -56,7 +67,7 @@ export class VersusOnline implements IScene {
     }
   const myId = this.rt.id; this.myId = myId;
   // Receive first to avoid missing early presence
-    this.rt.onMessage((m: RTMessage) => {
+  this.rt.onMessage((m: RTMessage) => {
       this.lastMsgAt = performance.now();
       if (m.type === 'state' && m.id !== myId) {
         this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
@@ -101,6 +112,20 @@ export class VersusOnline implements IScene {
       } else if (m.type === 'leave' && m.id !== myId) {
         this.toast = { text: 'Opponent left', t: 3 };
         this.waiting = true; this.bothReady = false; this.remoteId = null;
+      } else if (m.type === 'shoot' && m.id !== myId) {
+        const b = new Projectile(m.x, m.y, m.vx, m.vy, 'p2');
+        if ((m as any).w) b.width = (m as any).w as number; if ((m as any).h) b.height = (m as any).h as number; if ((m as any).color) b.color = (m as any).color as string;
+        this.enemyBullets.push(b);
+      } else if (m.type === 'powerSpawn') {
+        const kind = (m as any).kind as PowerType;
+        const pu = new PowerUp(m.x, m.y, kind);
+        pu.vx = m.vx;
+        (pu as any).pid = (m as any).pid;
+        this.powerups.push(pu);
+      } else if (m.type === 'pickup') {
+        const pid = (m as any).pid as string;
+        const idx = this.powerups.findIndex(p => (p as any).pid === pid);
+        if (idx >= 0) this.powerups.splice(idx, 1);
       }
     });
   // Show connected toast and status
@@ -214,7 +239,15 @@ export class VersusOnline implements IScene {
       // Spark burst on flap
       this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
     }
-  const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
+    const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
+    // shooting
+    const baseCd = 0.35; // seconds
+    if (engine.input.wasPressed('ShiftLeft') || engine.input.wasPressed('KeyF')) {
+      if (this.p1.fireCooldown <= 0) {
+        this.fireBullet(this.p1, 'p1', engine);
+        this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
+      }
+    }
     Physics.applyGravity(this.p1, dt); this.p1.update(dt);
     // bounds
     const h = engine.canvas.height; this.p1.y = Math.max(0, Math.min(h - this.p1.height, this.p1.y));
@@ -277,10 +310,47 @@ export class VersusOnline implements IScene {
         this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
         this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
         this.rt?.send({ type: 'spawn', id: this.rt.id, t: performance.now(), w, gap, topH, speed: this.speed });
+        // power-up chance
+        if (Math.random() < 0.3) {
+          const kind = pickPowerUp(Math.max(this.s1, this.s2));
+          const pu = new PowerUp(x + 140, Math.max(24, Math.min(h - 40, topH + gap * 0.5 - 8)), kind);
+          pu.vx = -Math.max(100, this.speed * 0.7);
+          const pid = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+          (pu as any).pid = pid;
+          this.powerups.push(pu);
+          this.rt?.send({ type: 'powerSpawn', id: this.rt.id, t: performance.now(), pid, kind, x: pu.x, y: pu.y, vx: pu.vx });
+        }
       }
     }
     for (const o of this.obstacles) o.update(dt);
     this.obstacles = this.obstacles.filter((o) => !o.isOffScreen());
+    // Update power-ups
+    for (const pu of this.powerups) pu.update(dt);
+    this.powerups = this.powerups.filter(p => !p.isOffScreen());
+    // Update bullets
+    for (const b of this.bullets) b.update(dt);
+    for (const b of this.enemyBullets) b.update(dt);
+    const W = engine.canvas.width, H = engine.canvas.height;
+    const hit = (b: Projectile, o: Obstacle) => Physics.checkCollision({ x: b.x, y: b.y, width: b.width, height: b.height } as any, o);
+    for (const b of this.bullets) {
+      for (const o of this.obstacles) { if (hit(b, o)) { b.active = false; Audio.combo(1); } }
+    }
+    for (const b of this.enemyBullets) {
+      for (const o of this.obstacles) { if (hit(b, o)) { b.active = false; } }
+    }
+    this.bullets = this.bullets.filter(b => b.active && !b.isOffScreen(W,H));
+    this.enemyBullets = this.enemyBullets.filter(b => b.active && !b.isOffScreen(W,H));
+    // Pickups for local player
+    for (let i = 0; i < this.powerups.length; i++) {
+      const pu = this.powerups[i];
+      if (Physics.checkCollision(this.p1, pu)) {
+        this.applyPowerUp(pu.type);
+        const pid = (pu as any).pid as string | undefined;
+        if (pid) this.rt?.send({ type: 'pickup', id: this.rt!.id, t: performance.now(), pid });
+        this.powerups.splice(i, 1); i--;
+        Audio.score();
+      }
+    }
     // Collisions and scoring similar to single-player
     // collision with pipes for p1
     for (const o of this.obstacles) {
@@ -359,7 +429,16 @@ export class VersusOnline implements IScene {
     this.remoteParticles.render(ctx);
     // draw obstacles
     for (const o of this.obstacles) this.renderer.drawObstacle(o);
-    this.hud.render(ctx, this.s1, this.s2);
+  this.hud.render(ctx, this.s1, this.s2);
+  // HUD status: show fire cooldown and active effects for P1
+  const cdFrac = this.p1.fireCooldown > 0 ? Math.min(1, this.p1.fireCooldown / 0.35) : 0;
+  const effects: Array<{label:string;color?:string;remain?:number}> = [];
+  const now = performance.now();
+  if (now < this.multishotUntil) effects.push({ label: 'Multi', color: '#38bdf8', remain: (this.multishotUntil - now)/1000 });
+  if (now < this.bigshotUntil) effects.push({ label: 'Big', color: '#fb7185', remain: (this.bigshotUntil - now)/1000 });
+  if (now < this.slowmoUntil) effects.push({ label: 'Slow', color: '#a78bfa', remain: (this.slowmoUntil - now)/1000 });
+  if (now < this.magnetUntil) effects.push({ label: 'Mag', color: '#f472b6', remain: (this.magnetUntil - now)/1000 });
+  this.hud.renderStatus(ctx, 16, 52, cdFrac, effects);
   // Names above players
   ctx.fillStyle = '#cdd9e5'; ctx.font = '700 12px system-ui';
   if (this.name) ctx.fillText(this.name, this.p1.x, Math.max(12, this.p1.y - 6));
@@ -396,6 +475,39 @@ export class VersusOnline implements IScene {
       ctx.restore();
       if (this.toast.t <= 0) this.toast = null;
     }
+  }
+
+  private isRapid() {
+    const now = performance.now();
+    return now < this.multishotUntil || now < this.bigshotUntil; // piggyback; treat as rapid window
+  }
+
+  private fireBullet(p: Player, owner: 'p1' | 'p2', engine: GameEngine) {
+    const nowMs = performance.now();
+    const y = p.y + p.height * 0.5 - 2;
+    const baseV = 420;
+    const color = owner === 'p1' ? '#ffd166' : '#ff7b72';
+    const sizeMul = performance.now() < this.bigshotUntil ? 1.6 : 1.0;
+    const mk = (vx: number, vy: number) => {
+      const b = new Projectile(p.x + p.width, y, vx, vy, owner);
+      b.color = color; b.width = 10 * sizeMul; b.height = 4 * sizeMul;
+      this.bullets.push(b);
+      this.rt?.send({ type: 'shoot', id: this.rt!.id, t: nowMs, x: b.x, y: b.y, vx: b.vx, vy: b.vy, w: b.width, h: b.height, color });
+    };
+    const multishot = performance.now() < this.multishotUntil;
+    if (multishot) { mk(baseV, -40); mk(baseV, 0); mk(baseV, 40); } else { mk(baseV, 0); }
+  }
+
+  private applyPowerUp(type: PowerType) {
+    const now = performance.now();
+    const p = POWERUPS[type]; if (!p) return;
+    if (type === 'heal') { this.p1.hp = Math.min(this.p1.maxHp, this.p1.hp + 1); }
+    else if (type === 'shield') { this.p1.maxHp += 1; this.p1.hp = Math.min(this.p1.maxHp, this.p1.hp + 1); }
+    else if (type === 'rapid') { /* reuse multishot window to mark rapid */ this.multishotUntil = now + (p.duration ?? 6) * 1000; }
+    else if (type === 'multishot') { this.multishotUntil = now + (p.duration ?? 6) * 1000; }
+    else if (type === 'bigshot') { this.bigshotUntil = now + (p.duration ?? 6) * 1000; }
+    else if (type === 'slowmo') { this.slowmoUntil = now + (p.duration ?? 3) * 1000; this.speed = Math.max(100, this.speed * 0.8); }
+    else if (type === 'magnet') { this.magnetUntil = now + (p.duration ?? 6) * 1000; }
   }
 }
 

@@ -6,7 +6,12 @@ export type RTMessage =
   | { type: 'leave'; id: string; roomId: string }
   | { type: 'state'; id: string; t: number; x: number; y: number; vy: number; score: number; hp: number; name?: string }
   | { type: 'spawn'; id: string; t: number; w: number; gap: number; topH: number; speed: number }
-  | { type: 'start'; id: string; roomId: string; t: number; startAt?: number; delayMs?: number };
+  | { type: 'start'; id: string; roomId: string; t: number; startAt?: number; delayMs?: number }
+  // Multiplayer gameplay extras (optional; ignored by older clients)
+  | { type: 'shoot'; id: string; t: number; x: number; y: number; vx: number; vy: number; w?: number; h?: number; color?: string }
+  | { type: 'powerSpawn'; id: string; t: number; pid: string; kind: string; x: number; y: number; vx: number }
+  | { type: 'pickup'; id: string; t: number; pid: string }
+  | { type: 'power'; id: string; t: number; kind: string; active: boolean; until?: number };
 
 export class Realtime {
   private client: WebPubSubClient | null = null;
