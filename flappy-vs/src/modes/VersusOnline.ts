@@ -43,7 +43,7 @@ export class VersusOnline implements IScene {
     try {
       await this.rt.connect(this.roomId);
     } catch (e) {
-      this.toast = { text: 'Online: failed to connect', t: 3 };
+  this.toast = { text: 'Online: failed to connect', t: 3 };
       return;
     }
   const myId = this.rt.id; this.myId = myId;
@@ -85,7 +85,7 @@ export class VersusOnline implements IScene {
       }
     });
   // Show connected toast and status
-  this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
+  this.toast = { text: `Connected • Room ${this.roomId} • ${this.rt.getTransport().toUpperCase()}`, t: 2.5 };
   // Presence join and waiting room
   this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
     this.rt.onDisconnected(() => {

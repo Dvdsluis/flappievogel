@@ -35,14 +35,24 @@ export class Realtime {
       client.on('connected', () => { this.connected = true; });
       client.on('disconnected', () => { this.connected = false; this.onDisc.forEach((f) => f()); });
       client.on('stopped', () => { this.connected = false; this.onDisc.forEach((f) => f()); });
+      // Always register group-message before join to avoid missing early messages
+      client.on('group-message', ({ message }) => {
+        try { this.onMsgHandler?.(JSON.parse(String(message.data)) as any); } catch {}
+      });
       await client.start();
       await client.joinGroup(this.group);
       this.connected = true;
     } catch (e) {
-      // Local fallback for dev: BroadcastChannel
+      // Local fallback only for localhost/dev
+      const host = (typeof window !== 'undefined' && window.location.hostname) || '';
+      const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+      if (!isLocal) {
+        // In production, surface the error to caller
+        throw e;
+      }
       try {
         this.mode = 'local';
-        this.bc = new BroadcastChannel(this.group);
+        this.bc = new BroadcastChannel(this.group!);
         this.bc.onmessage = (ev) => {
           const data = ev.data; // expect RTMessage JSON object
           try { this.onMsgHandler?.(data as RTMessage); } catch {}
@@ -57,11 +67,6 @@ export class Realtime {
   private onMsgHandler: ((msg: RTMessage) => void) | null = null;
   onMessage(handler: (msg: RTMessage) => void) {
     this.onMsgHandler = handler;
-    if (this.mode === 'azure') {
-      this.client?.on('group-message', ({ message }) => {
-        try { handler(JSON.parse(String(message.data)) as RTMessage); } catch {}
-      });
-    }
   }
 
   onDisconnected(handler: () => void) { this.onDisc.push(handler); }
@@ -83,4 +88,6 @@ export class Realtime {
   close() {
     try { this.bc?.close(); } catch {}
   }
+
+  getTransport() { return this.mode; }
 }
