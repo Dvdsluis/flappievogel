@@ -46,6 +46,7 @@ export class GameScene implements IScene {
     private bigshotT = 0;   // larger bullets with +1 damage
     private slowmoT = 0;    // world slow factor active
     private magnetT = 0;    // attract powerups
+    private rapidT = 0;     // reduce fire cooldown
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -85,6 +86,8 @@ export class GameScene implements IScene {
     // Reset touch button states
     this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
     this.restartRect = null;
+    // Reset temporary effects
+    this.multishotT = 0; this.bigshotT = 0; this.slowmoT = 0; this.magnetT = 0; this.rapidT = 0;
     // Helpers for on-screen touch buttons
     const updateButtonRects = () => {
         const w = engine.canvas.width, h = engine.canvas.height;
@@ -230,14 +233,16 @@ export class GameScene implements IScene {
             if (this.bigshotT > 0) { p.width = 14; p.damage = 2; }
             return p;
         };
-        if (this.multishotT > 0) {
+    if (this.multishotT > 0) {
             this.bullets.push(mk(-40, -4));
             this.bullets.push(mk(  0,  0));
             this.bullets.push(mk( 40,  4));
         } else {
             this.bullets.push(mk(0, 0));
         }
-        this.player.fireCooldown = this.bigshotT>0 ? 0.22 : (this.multishotT>0 ? 0.2 : 0.18);
+    let cd = this.bigshotT>0 ? 0.22 : (this.multishotT>0 ? 0.2 : 0.18);
+    if (this.rapidT > 0) cd = Math.max(0.08, cd * 0.55);
+    this.player.fireCooldown = cd;
         Audio.beep(980, 0.05, 'square', 0.05);
     }
 
@@ -460,7 +465,7 @@ export class GameScene implements IScene {
         for (const p of this.powerUps) {
             if (hitRect(this.player.x,this.player.y,this.player.width,this.player.height, p.x,p.y,p.width,p.height)) {
                 if (p.type === 'heal') this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
-                if (p.type === 'rapid') this.player.fireCooldown = Math.min(this.player.fireCooldown, 0.08);
+                if (p.type === 'rapid') this.rapidT = Math.max(this.rapidT, 8);
                 if (p.type === 'shield') { this.player.maxHp = Math.min(5, this.player.maxHp + 1); this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1); }
                 if (p.type === 'multishot') this.multishotT = Math.max(this.multishotT, 8);
                 if (p.type === 'bigshot') this.bigshotT = Math.max(this.bigshotT, 8);
@@ -480,6 +485,7 @@ export class GameScene implements IScene {
     this.multishotT = Math.max(0, this.multishotT - dt);
     this.bigshotT = Math.max(0, this.bigshotT - dt);
     this.magnetT = Math.max(0, this.magnetT - dt);
+    this.rapidT = Math.max(0, this.rapidT - dt);
     // Floating texts update
     for (const f of this.floats) { f.ttl -= dt; f.y += f.vy * dt; }
     this.floats = this.floats.filter(f => f.ttl > 0);
@@ -530,6 +536,60 @@ export class GameScene implements IScene {
     for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
         this.hud.render(ctx, this.score, undefined, this.player.hp);
+        // Tiny icons for active power-ups next to hearts
+        {
+            const iconList: Array<{active:boolean,color:string,glyph:string}> = [
+                { active: this.rapidT > 0,     color: '#f7b84a', glyph: 'R' },
+                { active: this.multishotT > 0, color: '#38bdf8', glyph: 'M' },
+                { active: this.bigshotT > 0,   color: '#fb7185', glyph: 'B' },
+                { active: this.slowmoT > 0,    color: '#a78bfa', glyph: '⌛' },
+                { active: this.magnetT > 0,    color: '#f472b6', glyph: 'U' },
+            ];
+            const hp = this.player.hp ?? 0;
+            let x = 16 + hp * 18 + 12; // after hearts row
+            const y = 36; // hearts baseline
+            for (const a of iconList) {
+                if (!a.active) continue;
+                ctx.save();
+                ctx.globalAlpha = 0.95;
+                const w = 12, h = 12, r = 3;
+                ctx.fillStyle = a.color;
+                ctx.beginPath(); ctx.roundRect(x, y + 2, w, h, r); ctx.fill();
+                ctx.fillStyle = '#0f172a';
+                ctx.font = '700 9px system-ui';
+                const tw = ctx.measureText(a.glyph).width;
+                ctx.fillText(a.glyph, x + (w - tw) / 2, y + 11);
+                ctx.restore();
+                x += w + 6;
+            }
+        }
+        // Active power-up badges with timers
+        const badges: Array<{label:string, t:number, d:number, color:string}> = [];
+        if (this.rapidT > 0) badges.push({ label: 'Rapid', t: this.rapidT, d: 8, color: '#f7b84a' });
+        if (this.multishotT > 0) badges.push({ label: 'Multi', t: this.multishotT, d: 8, color: '#38bdf8' });
+        if (this.bigshotT > 0) badges.push({ label: 'Big', t: this.bigshotT, d: 8, color: '#fb7185' });
+        if (this.slowmoT > 0) badges.push({ label: 'Slow', t: this.slowmoT, d: 4, color: '#a78bfa' });
+        if (this.magnetT > 0) badges.push({ label: 'Mag', t: this.magnetT, d: 8, color: '#f472b6' });
+        if (badges.length) {
+            let bx = 16, by = 56;
+            for (const b of badges) {
+                const w = 74, h = 20, r = 8;
+                ctx.save();
+                ctx.globalAlpha = 0.9;
+                ctx.fillStyle = '#0f172acc';
+                ctx.beginPath(); ctx.roundRect(bx, by, w, h, r); ctx.fill();
+                // progress
+                const frac = Math.max(0, Math.min(1, b.t / b.d));
+                ctx.fillStyle = b.color + 'aa';
+                ctx.beginPath(); ctx.roundRect(bx+2, by+h-6, (w-4) * frac, 4, 3); ctx.fill();
+                // label
+                ctx.fillStyle = '#e8e8f0';
+                ctx.font = '600 12px system-ui';
+                ctx.fillText(b.label, bx + 8, by + 14);
+                ctx.restore();
+                bx += w + 8;
+            }
+        }
         // Combo indicator near score
         if (this.comboT > 0 && this.combo > 1) {
             ctx.save();
