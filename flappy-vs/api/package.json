@@ -1,0 +1,10 @@
+{
+  "name": "flappy-vs-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@azure/web-pubsub": "^1.2.0"
+  }
+}
