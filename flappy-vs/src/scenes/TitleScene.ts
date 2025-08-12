@@ -172,6 +172,30 @@ export class TitleScene implements IScene {
         y += 28;
     ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
 
+        // Power-ups quick guide
+        const pY = cY + 170;
+        const pW = Math.min(760, w - 64);
+        const pX = (w - pW) / 2;
+        ctx.fillStyle = '#0f172acc';
+        ctx.beginPath();
+        ctx.roundRect(pX, pY, pW, 130, 14);
+        ctx.fill();
+        ctx.fillStyle = '#cdd9e5';
+        ctx.font = '700 20px system-ui';
+        ctx.fillText('Power-ups', pX + 16, pY + 16);
+        ctx.font = '500 14px system-ui';
+        let py = pY + 44;
+        const list = [
+            ['+ Heal', 'gain 1 heart'],
+            ['R Rapid', 'shorter cooldown'],
+            ['S Shield', '+1 max heart and heal'],
+            ['M Multishot', 'fires 3 bullets'],
+            ['B Bigshot', 'bigger bullets, +1 dmg'],
+            ['⌛ Slowmo', 'world slows briefly'],
+            ['U Magnet', 'pulls pickups nearby'],
+        ];
+        for (const [k,v] of list) { ctx.fillText(`${k} — ${v}`, pX + 16, py); py += 20; }
+
         // Top scores (bottom center)
         const top = Scoreboard.getTop(5);
         if (top.length) {

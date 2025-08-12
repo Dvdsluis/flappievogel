@@ -7,6 +7,7 @@ export class Projectile {
   vy: number;
   owner: 'p1' | 'p2' | 'player';
   active = true;
+  damage = 1;
   constructor(x: number, y: number, vx: number, vy: number, owner: 'p1' | 'p2' | 'player' = 'player') {
     this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.owner = owner;
   }

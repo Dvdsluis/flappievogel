@@ -41,6 +41,11 @@ export class GameScene implements IScene {
     private combo = 0;
     private comboT = 0; // time left to keep combo alive
     private ended = false; // prevent repeated game-over prompts on mobile
+    // Temporary effects
+    private multishotT = 0; // triples shots horizontally
+    private bigshotT = 0;   // larger bullets with +1 damage
+    private slowmoT = 0;    // world slow factor active
+    private magnetT = 0;    // attract powerups
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -158,13 +163,7 @@ export class GameScene implements IScene {
             recomputeTouchButtons(te);
             if (this.btnLeftDown || this.btnRightDown || this.btnShootDown) {
                 // Button touches: shoot if pressed, otherwise movement is handled elsewhere
-                if (this.btnShootDown && this.player.fireCooldown === 0) {
-                    const bx = this.player.x + this.player.width;
-                    const by = this.player.y + this.player.height * 0.5 - 2;
-                    this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
-                    this.player.fireCooldown = 0.18;
-                    Audio.beep(980, 0.05, 'square', 0.05);
-                }
+                if (this.btnShootDown) this.fireWeapon();
                 return;
             }
             // If touches are near the shoot corner, treat as shoot area to avoid accidental flap
@@ -178,22 +177,14 @@ export class GameScene implements IScene {
                 const y = (t.clientY - rect.top) * sy;
                 if (x > cw * 0.7 && y > ch * 0.6) { inShootCorner = true; break; }
             }
-            if (inShootCorner && this.player.fireCooldown === 0) {
-                const bx = this.player.x + this.player.width;
-                const by = this.player.y + this.player.height * 0.5 - 2;
-                this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
-                this.player.fireCooldown = 0.18;
-                Audio.beep(980, 0.05, 'square', 0.05);
+            if (inShootCorner) {
+                this.fireWeapon();
                 return;
             }
             const touches = te.touches?.length ?? 0;
-            if (touches >= 2 && this.player.fireCooldown === 0) {
+            if (touches >= 2) {
                 // two-finger shoot
-                const bx = this.player.x + this.player.width;
-                const by = this.player.y + this.player.height * 0.5 - 2;
-                this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
-                this.player.fireCooldown = 0.18;
-                Audio.beep(980, 0.05, 'square', 0.05);
+                this.fireWeapon();
             } else {
                 Physics.jump(this.player); Audio.flap();
                 this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, Settings.reducedMotion ? 4 : 8, '#88ccff88');
@@ -204,12 +195,8 @@ export class GameScene implements IScene {
         const act = mapPointerButtonToAction(btn);
         if (act === 'flap') {
             Physics.jump(this.player); Audio.flap();
-        } else if (act === 'shoot' && this.player.fireCooldown === 0) {
-            const bx = this.player.x + this.player.width;
-            const by = this.player.y + this.player.height * 0.5 - 2;
-            this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
-            this.player.fireCooldown = 0.18;
-            Audio.beep(980, 0.05, 'square', 0.05);
+        } else if (act === 'shoot') {
+            this.fireWeapon();
         }
     };
     engine.canvas.oncontextmenu = (e) => { e.preventDefault(); };
@@ -233,35 +220,55 @@ export class GameScene implements IScene {
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.paused = true; });
     }
 
+    // Fire weapon respecting cooldown and active power-ups
+    private fireWeapon() {
+        if (this.player.fireCooldown > 0) return;
+        const bx = this.player.x + this.player.width;
+        const by = this.player.y + this.player.height * 0.5 - 2;
+        const mk = (dx:number, dy:number) => {
+            const p = new Projectile(bx, by + dy, 360, dx, 'player');
+            if (this.bigshotT > 0) { p.width = 14; p.damage = 2; }
+            return p;
+        };
+        if (this.multishotT > 0) {
+            this.bullets.push(mk(-40, -4));
+            this.bullets.push(mk(  0,  0));
+            this.bullets.push(mk( 40,  4));
+        } else {
+            this.bullets.push(mk(0, 0));
+        }
+        this.player.fireCooldown = this.bigshotT>0 ? 0.22 : (this.multishotT>0 ? 0.2 : 0.18);
+        Audio.beep(980, 0.05, 'square', 0.05);
+    }
+
     update(dt: number, engine: GameEngine): void {
     const canvasH = engine.canvas.height;
     if (engine.input.wasPressed('KeyP')) this.paused = !this.paused;
     if (engine.input.wasPressed('KeyR')) this.init(engine);
     if (this.paused) return;
+        // Global slow-mo
+    const slowFactor = this.slowmoT > 0 ? 0.7 : 1.0;
+    const gdt = dt * slowFactor;
         // Controls: flap (Space, ArrowUp, or W), left/right nudge (Arrows or A/D), shoot (J or Ctrl)
     if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp') || engine.input.wasPressed('KeyW')) {
             Physics.jump(this.player); Audio.flap();
             this.particles.burst(this.player.x + this.player.width * 0.2, this.player.y + this.player.height, Settings.reducedMotion ? 4 : 8, '#88ccff88');
         }
-    if ((engine.input.isDown('KeyJ') || engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || this.btnShootDown) && this.player.fireCooldown === 0) {
-            const bx = this.player.x + this.player.width;
-            const by = this.player.y + this.player.height * 0.5 - 2;
-            this.bullets.push(new Projectile(bx, by, 360, 0, 'player'));
-            this.player.fireCooldown = 0.18; // rapid if power-up later
-            Audio.beep(980, 0.05, 'square', 0.05);
+    if (engine.input.isDown('KeyJ') || engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || this.btnShootDown) {
+            this.fireWeapon();
         }
     const dir = engine.input.getMovementDirection();
     const wasdX = engine.input.getWASDHorizontal?.() ?? ((engine.input.isDown('KeyD') ? 1 : 0) + (engine.input.isDown('KeyA') ? -1 : 0));
     const btnX = (this.btnRightDown ? 1 : 0) - (this.btnLeftDown ? 1 : 0);
     this.player.vx = (dir.x + wasdX + this.mobileMoveX + btnX) * 80;
-        Physics.applyGravity(this.player, dt);
-        this.player.update(dt);
+    Physics.applyGravity(this.player, gdt);
+    this.player.update(gdt);
 
         // Boundaries
         this.player.y = Math.max(0, Math.min(canvasH - this.player.height, this.player.y));
 
         // Spawn obstacles (pipes) periodically
-        this.timeToNext -= dt;
+    this.timeToNext -= gdt;
         if (this.timeToNext <= 0) {
             // Progressive difficulty: start slow/wide, ramp up gently
             const progress = Math.min(1, this.score / 30); // 0..1 over first ~30 points
@@ -289,7 +296,7 @@ export class GameScene implements IScene {
         }
 
     // Update obstacles and score when passed
-    for (const o of this.obstacles) o.update(dt);
+    for (const o of this.obstacles) o.update(gdt);
         // remove off-screen
         this.obstacles = this.obstacles.filter((o) => !o.isOffScreen());
 
@@ -321,7 +328,7 @@ export class GameScene implements IScene {
         }
 
         // Enemies and power-ups spawn
-    this.enemyTimer -= dt;
+    this.enemyTimer -= gdt;
     if (this.enemyTimer <= 0) {
             // Try to spawn inside the latest pipe gap
             let gapTop = 40, gapBottom = canvasH - 40;
@@ -359,16 +366,16 @@ export class GameScene implements IScene {
             const base = 2.4 - Math.min(1.2, this.score * 0.03);
             this.enemyTimer = Math.max(0.8, base + (variant === 'tank' ? 0.3 : 0));
         }
-        this.powerTimer -= dt;
+    this.powerTimer -= gdt;
         if (this.powerTimer <= 0) {
-            const types: Array<PowerUp['type']> = ['heal','rapid','shield'];
+            const types: Array<PowerUp['type']> = ['heal','rapid','shield','multishot','bigshot','slowmo','magnet'];
             const type = types[(Math.random() * types.length) | 0];
             this.powerUps.push(new PowerUp(engine.canvas.width + 20, 80 + Math.random() * (canvasH - 160), type));
             this.powerTimer = 8 + Math.random() * 6;
         }
 
         // Update bullets/enemies/power-ups
-        for (const b of this.bullets) b.update(dt);
+    for (const b of this.bullets) b.update(gdt);
         for (const e of this.enemies) {
             // Movement pattern per variant
             const phase = ((e as any).phase ?? 0) + performance.now() / 1000;
@@ -384,13 +391,24 @@ export class GameScene implements IScene {
             } else {
                 e.vy = Math.sin(phase) * 35; // drone
             }
-            e.update(dt);
+            e.update(gdt);
             const minY = (e as any).minY ?? 20;
             const maxY = (e as any).maxY ?? (canvasH - 40);
             if (e.y < minY) e.y = minY;
             if (e.y + e.height > maxY) e.y = maxY - e.height;
         }
-        for (const p of this.powerUps) p.update(dt);
+        for (const p of this.powerUps) {
+            // Magnet attraction
+            if (this.magnetT > 0) {
+                const cx = this.player.x + this.player.width/2;
+                const cy = this.player.y + this.player.height/2;
+                const dx = cx - (p.x + p.width/2);
+                const dy = cy - (p.y + p.height/2);
+                const d2 = dx*dx + dy*dy;
+                if (d2 < 200*200) { p.vx += Math.sign(dx) * 20; p.vy += Math.sign(dy) * 20; }
+            }
+            p.update(gdt);
+        }
         this.bullets = this.bullets.filter(b => !b.isOffScreen(engine.canvas.width, canvasH) && b.active);
         this.enemies = this.enemies.filter(e => !e.isOffScreen());
         this.powerUps = this.powerUps.filter(p => !p.isOffScreen());
@@ -403,7 +421,7 @@ export class GameScene implements IScene {
                 if (hitRect(b.x,b.y,b.width,b.height, e.x,e.y,e.width,e.height)) {
                     // consume projectile on hit for clearer feedback
                     b.active = false;
-                    e.health -= 1;
+                    e.health -= (b as any).damage ?? 1;
                     // small spark on hit
                     this.particles.burst(e.x + e.width/2, e.y + e.height/2, Settings.reducedMotion ? 6 : 10, '#ffd166aa');
                     if (e.health <= 0) {
@@ -443,17 +461,25 @@ export class GameScene implements IScene {
             if (hitRect(this.player.x,this.player.y,this.player.width,this.player.height, p.x,p.y,p.width,p.height)) {
                 if (p.type === 'heal') this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
                 if (p.type === 'rapid') this.player.fireCooldown = Math.min(this.player.fireCooldown, 0.08);
-                if (p.type === 'shield') this.player.maxHp = Math.min(5, this.player.maxHp + 1); this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+                if (p.type === 'shield') { this.player.maxHp = Math.min(5, this.player.maxHp + 1); this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1); }
+                if (p.type === 'multishot') this.multishotT = Math.max(this.multishotT, 8);
+                if (p.type === 'bigshot') this.bigshotT = Math.max(this.bigshotT, 8);
+                if (p.type === 'slowmo') this.slowmoT = Math.max(this.slowmoT, 4);
+                if (p.type === 'magnet') this.magnetT = Math.max(this.magnetT, 8);
                 this.particles.burst(p.x+p.width/2,p.y+p.height/2,14,'#7ee787aa');
                 p.x = -9999;
             }
         }
 
     // Particles update & camera shake timer
-    this.particles.update(dt);
+    this.particles.update(gdt);
         this.shakeT = Math.max(0, this.shakeT - dt);
     this.hurtT = Math.max(0, this.hurtT - dt);
     if (this.comboT > 0) this.comboT = Math.max(0, this.comboT - dt);
+    this.slowmoT = Math.max(0, this.slowmoT - dt);
+    this.multishotT = Math.max(0, this.multishotT - dt);
+    this.bigshotT = Math.max(0, this.bigshotT - dt);
+    this.magnetT = Math.max(0, this.magnetT - dt);
     // Floating texts update
     for (const f of this.floats) { f.ttl -= dt; f.y += f.vy * dt; }
     this.floats = this.floats.filter(f => f.ttl > 0);

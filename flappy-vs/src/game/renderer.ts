@@ -146,10 +146,23 @@ export class Renderer {
 
     drawPowerUp(p: PowerUp) {
         const { ctx } = this;
-        const colors: Record<string,string> = { heal: '#7ee787', rapid: '#f7b84a', shield: '#8b8efb' };
+        const colors: Record<string,string> = {
+            heal: '#7ee787', rapid: '#f7b84a', shield: '#8b8efb',
+            multishot: '#38bdf8', bigshot: '#fb7185', slowmo: '#a78bfa', magnet: '#f472b6'
+        };
         ctx.fillStyle = colors[p.type] || '#f7b84a';
         ctx.beginPath();
         ctx.roundRect(p.x, p.y, p.width, p.height, 4);
         ctx.fill();
+        // simple glyphs per type
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 10px system-ui';
+        const cx = p.x + p.width/2, cy = p.y + p.height/2 + 3;
+        const glyphs: Record<string,string> = {
+            heal: '+', rapid: 'R', shield: 'S', multishot: 'M', bigshot: 'B', slowmo: '⌛', magnet: 'U'
+        };
+        const g = glyphs[p.type] || '?';
+        const tw = ctx.measureText(g).width;
+        ctx.fillText(g, cx - tw/2, cy);
     }
 }

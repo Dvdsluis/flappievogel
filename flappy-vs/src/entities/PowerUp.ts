@@ -1,4 +1,4 @@
-export type PowerType = 'heal' | 'rapid' | 'shield';
+export type PowerType = 'heal' | 'rapid' | 'shield' | 'multishot' | 'bigshot' | 'slowmo' | 'magnet';
 
 export class PowerUp {
   x: number;
