@@ -71,6 +71,8 @@ export class Realtime {
           try { this.onMsgHandler?.(data as RTMessage); } catch {}
         };
         this.connected = true;
+  // Clear the last error since local transport is active
+  this.lastError = null;
       } catch (e2) {
         this.onErr.forEach((f)=>f(e));
         throw e; // rethrow original negotiate error if BC not available
