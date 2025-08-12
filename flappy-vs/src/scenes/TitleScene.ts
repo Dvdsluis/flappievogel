@@ -40,10 +40,13 @@ export class TitleScene implements IScene {
                 this.launchOnline(engine);
                 return;
             }
+            // If modal is open, ignore background start triggers
+            if (this.onlineModalOpen) return;
             if (started) return; started = true; cleanup();
             engine.setScene(versus ? new VersusScene() : new GameScene());
         };
         const onPointerDown = (e: PointerEvent) => {
+            try { e.stopPropagation(); } catch {}
             // Check for button clicks on desktop
             if (this.btnS || this.btnV || this.btnEditName) {
                 const rect = engine.canvas.getBoundingClientRect();
@@ -96,16 +99,17 @@ export class TitleScene implements IScene {
             startNow(false);
         };
         const onTouchStart = (e: TouchEvent) => {
+            try { e.stopPropagation(); } catch {}
             const touches = e.touches?.length ?? 0;
             startNow(touches >= 2);
         };
-        const onClick = (e: MouseEvent) => startNow(false);
-    const onDocPointerDown = (e: PointerEvent) => startNow(false);
+        const onClick = (e: MouseEvent) => { try { e.stopPropagation(); } catch {}; startNow(false); };
+    const onDocPointerDown = (e: PointerEvent) => { if (this.onlineModalOpen) return; startNow(false); };
         const onDocTouchStart = (e: TouchEvent) => {
             const touches = e.touches?.length ?? 0;
-            startNow(touches >= 2);
+            if (this.onlineModalOpen) return; startNow(touches >= 2);
         };
-        const onDocClick = (e: MouseEvent) => startNow(false);
+        const onDocClick = (e: MouseEvent) => { if (this.onlineModalOpen) return; startNow(false); };
 
         engine.canvas.onpointerdown = onPointerDown as any;
         engine.canvas.ontouchstart = onTouchStart as any;
@@ -211,7 +215,7 @@ export class TitleScene implements IScene {
 
         // Cards with options
         // Play buttons card (centered)
-        const cardW = Math.min(560, w - 64);
+    const cardW = Math.min(560, w - 64);
         const cardY = 170;
         const cardX = (w - cardW) / 2;
         ctx.fillStyle = '#0f172ae6';
@@ -221,9 +225,12 @@ export class TitleScene implements IScene {
         ctx.fillStyle = '#cdd9e5';
         ctx.font = '700 22px system-ui';
         ctx.fillText('Play', cardX + 16, cardY + 16);
-        // Buttons
-    const btnW = 180, btnH = 44, gap = 18;
-    const bx = cardX + 16, by = cardY + 56;
+        // Buttons (dynamically sized and centered)
+    const gap = 18; const btnH = 44; const pad = 16; const count = 3;
+    const btnW = Math.floor((cardW - pad * 2 - gap * (count - 1)) / count);
+    const totalW = btnW * count + gap * (count - 1);
+    const bx = cardX + Math.max(pad, (cardW - totalW) / 2);
+    const by = cardY + 56;
         const drawBtn = (x:number, y:number, label:string, icon?:string) => {
             ctx.fillStyle = '#15223f';
             ctx.strokeStyle = '#58a6ffaa';
