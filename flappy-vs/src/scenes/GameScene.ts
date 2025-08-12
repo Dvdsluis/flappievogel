@@ -37,6 +37,9 @@ export class GameScene implements IScene {
     private floats: Array<{x:number,y:number,text:string,ttl:number,vy:number}> = [];
     private static readonly KILL_POINTS = 2;
     private playerName: string | null = null;
+    private hurtT = 0; // seconds remaining for hurt tint
+    private combo = 0;
+    private comboT = 0; // time left to keep combo alive
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -295,6 +298,8 @@ export class GameScene implements IScene {
                 Audio.hit();
                 this.particles.burst(this.player.x + this.player.width/2, this.player.y + this.player.height/2, Settings.reducedMotion ? 6 : 12, '#ff7b72aa');
                 this.shakeT = Settings.reducedMotion ? 0.0 : 0.2;
+                this.hurtT = 0.35; // brief tint
+                this.combo = 0; this.comboT = 0; // reset combo on hit
                 // brief invuln by pushing player left slightly
                 this.player.x -= 10;
                 if (this.player.hp <= 0) {
@@ -402,7 +407,7 @@ export class GameScene implements IScene {
 
         // Bullet -> Enemy collisions
         const hitRect = (ax:number,ay:number,aw:number,ah:number, bx:number,by:number,bw:number,bh:number) => ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-        for (const b of this.bullets) {
+    for (const b of this.bullets) {
             for (const e of this.enemies) {
                 if (!b.active) continue;
                 if (hitRect(b.x,b.y,b.width,b.height, e.x,e.y,e.width,e.height)) {
@@ -419,8 +424,14 @@ export class GameScene implements IScene {
                         e.x = -9999; // flagged; filtered later
                         // tougher enemies give a bit more
                         const bonus = ((e as any).variant === 'tank') ? GameScene.KILL_POINTS + 1 : GameScene.KILL_POINTS;
-                        this.score += bonus;
+                        // combo logic: chain kills within window
+                        const windowS = 2.2; // seconds
+                        if (this.comboT > 0) this.combo++; else this.combo = 1;
+                        this.comboT = windowS;
+                        const comboBonus = Math.max(0, this.combo - 1); // +1 per extra chain
+                        this.score += bonus + comboBonus;
                         this.floats.push({ x: cx, y: cy, text: `+${bonus}`, ttl: 0.9, vy: -32 });
+                        if (comboBonus > 0) { this.floats.push({ x: cx + 14, y: cy - 18, text: `x${this.combo}`, ttl: 0.8, vy: -26 }); Audio.combo(this.combo); }
                         this.shakeT = Settings.reducedMotion ? 0.0 : Math.max(this.shakeT, 0.12);
                         Audio.score();
                     }
@@ -455,8 +466,10 @@ export class GameScene implements IScene {
         }
 
     // Particles update & camera shake timer
-        this.particles.update(dt);
+    this.particles.update(dt);
         this.shakeT = Math.max(0, this.shakeT - dt);
+    this.hurtT = Math.max(0, this.hurtT - dt);
+    if (this.comboT > 0) this.comboT = Math.max(0, this.comboT - dt);
     // Floating texts update
     for (const f of this.floats) { f.ttl -= dt; f.y += f.vy * dt; }
     this.floats = this.floats.filter(f => f.ttl > 0);
@@ -471,7 +484,8 @@ export class GameScene implements IScene {
     for (const o of this.obstacles) this.renderer.drawObstacle(o);
     for (const e of this.enemies) this.renderer.drawEnemy(e);
     for (const p of this.powerUps) this.renderer.drawPowerUp(p);
-        this.renderer.drawPlayer(this.player, '#58a6ff');
+        const playerColor = this.hurtT > 0 ? '#f87171' : '#58a6ff';
+        this.renderer.drawPlayer(this.player, playerColor);
         // Player name label above character
         if (this.playerName) {
             const label = this.playerName.slice(0, 18);
@@ -491,6 +505,14 @@ export class GameScene implements IScene {
     for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
         this.hud.render(ctx, this.score, undefined, this.player.hp);
+        // Combo indicator near score
+        if (this.comboT > 0 && this.combo > 1) {
+            ctx.save();
+            ctx.fillStyle = '#ffd166';
+            ctx.font = '700 14px system-ui';
+            ctx.fillText(`Combo x${this.combo}`, 16, 46);
+            ctx.restore();
+        }
         // Floating texts render
         if (this.floats.length) {
             for (const f of this.floats) {

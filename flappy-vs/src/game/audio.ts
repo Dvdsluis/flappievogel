@@ -28,6 +28,7 @@ class AudioManager {
   flap() { this.beep(660, 0.05, 'square', 0.05); }
   score() { this.beep(880, 0.08, 'triangle', 0.06); }
   hit() { this.beep(120, 0.15, 'sawtooth', 0.08); }
+  combo(n: number) { if (this._muted) return; const f = 900 + Math.min(4, n) * 80; this.beep(f, 0.05, 'triangle', 0.05); }
 }
 
 export const Audio = new AudioManager();

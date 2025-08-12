@@ -10,6 +10,7 @@ export class TitleScene implements IScene {
     // clickable button hit boxes
     private btnS: {x:number,y:number,w:number,h:number} | null = null;
     private btnV: {x:number,y:number,w:number,h:number} | null = null;
+    private btnEditName: {x:number,y:number,w:number,h:number} | null = null;
     onResize?(engine: GameEngine): void {
         engine.ctx.setTransform(1,0,0,1,0,0);
     }
@@ -31,7 +32,7 @@ export class TitleScene implements IScene {
         };
         const onPointerDown = (e: PointerEvent) => {
             // Check for button clicks on desktop
-            if (this.btnS || this.btnV) {
+            if (this.btnS || this.btnV || this.btnEditName) {
                 const rect = engine.canvas.getBoundingClientRect();
                 const sx = engine.canvas.width / rect.width;
                 const sy = engine.canvas.height / rect.height;
@@ -39,6 +40,15 @@ export class TitleScene implements IScene {
                 const y = (e.clientY - rect.top) * sy;
                 if (this.btnS && x>=this.btnS.x && x<=this.btnS.x+this.btnS.w && y>=this.btnS.y && y<=this.btnS.y+this.btnS.h) return startNow(false);
                 if (this.btnV && x>=this.btnV.x && x<=this.btnV.x+this.btnV.w && y>=this.btnV.y && y<=this.btnV.y+this.btnV.h) return startNow(true);
+                if (this.btnEditName && x>=this.btnEditName.x && x<=this.btnEditName.x+this.btnEditName.w && y>=this.btnEditName.y && y<=this.btnEditName.y+this.btnEditName.h) {
+                    // Prompt to edit name
+                    try {
+                        const current = Scoreboard.getPlayerName() || 'Anon';
+                        const entered = typeof window !== 'undefined' ? window.prompt('Your name', current) : null;
+                        if (entered != null) Scoreboard.setPlayerName(entered);
+                    } catch {}
+                    return; // don't start the game
+                }
             }
             startNow(false);
         };
@@ -183,6 +193,16 @@ export class TitleScene implements IScene {
             ctx.font = '400 12px system-ui';
             ctx.fillStyle = '#94a3b8';
             ctx.fillText('Press C to clear • Name is saved locally', bx + 12, by + boxH - 10);
+            // Edit name button (small)
+            const btnW = 92, btnH = 22;
+            const ex = bx + boxW - btnW - 10, ey = by + 10;
+            ctx.fillStyle = '#15223f';
+            ctx.strokeStyle = '#58a6ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.roundRect(ex, ey, btnW, btnH, 6); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#e8e8f0'; ctx.font = '600 12px system-ui';
+            ctx.fillText('Edit name', ex + 12, ey + 15);
+            this.btnEditName = { x: ex, y: ey, w: btnW, h: btnH };
         }
 
         // Pulse prompt
