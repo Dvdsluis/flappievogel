@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Azure location for all resources')
-param location string = deployment().location
+param location string = 'westeurope'
 @description('Environment name (azd)')
 param environmentName string
 @description('Resource group name to create')

@@ -17,8 +17,8 @@ resource wps 'Microsoft.SignalRService/webPubSub@2024-03-01' = {
   name: wpsName
   location: location
   sku: {
-    name: 'Standard_S1'
-    capacity: 1
+  name: 'Free_F1'
+  capacity: 1
   }
   tags: {
     'azd-env-name': environmentName
@@ -43,10 +43,10 @@ resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
 // Static Web App
 resource swa 'Microsoft.Web/staticSites@2024-04-01' = {
   name: swaName
-  location: 'centralus' // SWA is global; region is for metadata
+  location: location // SWA is global; region is for metadata
   sku: {
-    name: 'Standard'
-    tier: 'Standard'
+    name: 'Free'
+    tier: 'Free'
   }
   properties: {
     repositoryUrl: ''
