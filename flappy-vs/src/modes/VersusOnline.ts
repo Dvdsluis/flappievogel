@@ -34,6 +34,16 @@ export class VersusOnline implements IScene {
   // mobile helpers
   private isTouch = 'ontouchstart' in window;
   private mobileMoveX = 0; // -1..1 from screen halves
+  private shootingHeld = false; // mouse or keyboard held
+  private touchShootHeld = false; // touch gesture held
+  private hintT = 4; // seconds to show controls hint
+  // touch buttons (optional UI like single player)
+  private btnRects: { left: {x:number,y:number,w:number,h:number}, right: {x:number,y:number,w:number,h:number}, shoot: {x:number,y:number,w:number,h:number} } | null = null;
+  private btnLeftDown = false; private btnRightDown = false; private btnShootDown = false;
+  private lefty = false; // mirror shoot corner for left-handed players
+  private lastLeftCornerTap = 0;
+  // gamepad
+  private prevPadButtons: boolean[] = [];
   // net smoothing
   private remoteHistory: Array<{t:number,x:number,y:number,vy:number,score:number,hp:number,name?:string}> = [];
   private sendAccum = 0; // throttle to ~25Hz
@@ -150,6 +160,10 @@ export class VersusOnline implements IScene {
     window.addEventListener('beforeunload', this.unloadHandler);
 
     // Pointer controls: Left-click = flap, Right-click = shoot
+  // Load preferences
+  try { const l = localStorage.getItem('lefty'); this.lefty = l === '1'; } catch {}
+  // Avoid browser gestures on touch devices
+    try { (engine.canvas.style as any).touchAction = 'none'; } catch {}
     const onPointer = (e: PointerEvent) => {
       // Prevent default for context menu on canvas
       if (e.button === 2) e.preventDefault();
@@ -158,15 +172,18 @@ export class VersusOnline implements IScene {
         Physics.jump(this.p1); Audio.flap();
         this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
       } else if (act === 'shoot') {
+        // Immediate shot + start held shooting
         const baseCd = 0.35;
         if (this.p1.fireCooldown <= 0) {
           this.fireBullet(this.p1, 'p1', engine);
           this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
         }
+        this.shootingHeld = true;
       }
     };
     engine.canvas.onpointerdown = onPointer as any;
     engine.canvas.oncontextmenu = (e) => { e.preventDefault(); };
+    engine.canvas.onpointerup = (e: PointerEvent) => { if ((e.button ?? 0) === 2) this.shootingHeld = false; };
 
     // Touch controls: tap = flap, two-finger or bottom-right corner = shoot, screen halves for left/right nudge
     const calcMobileMove = (te: TouchEvent) => {
@@ -179,33 +196,78 @@ export class VersusOnline implements IScene {
       }
       this.mobileMoveX = right - left;
     };
+    const updateButtonRects = () => {
+      const w = engine.canvas.width, h = engine.canvas.height;
+      const size = Math.max(60, Math.min(120, Math.floor(Math.min(w, h) * 0.14)));
+      const pad = 24;
+      this.btnRects = {
+        left:  { x: pad, y: h - size - pad, w: size, h: size },
+        right: { x: pad + size + 16, y: h - size - pad, w: size, h: size },
+        shoot: { x: (this.lefty ? pad : (w - size - pad)), y: h - size - pad, w: size, h: size },
+      };
+    };
+    const hitBtn = (which: 'left'|'right'|'shoot', x:number, y:number) => {
+      if (!this.btnRects) return false;
+      const r = this.btnRects[which];
+      return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    };
     const onTouch = (te: TouchEvent) => {
       // Shooting if two fingers, or a touch in the bottom-right corner
       const cw = engine.canvas.width, ch = engine.canvas.height;
       const rect = engine.canvas.getBoundingClientRect();
       const sx = cw / rect.width, sy = ch / rect.height;
+      updateButtonRects();
+      // Reset button states
+      this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
+      // Determine button press hits
+      for (let i = 0; i < te.touches.length; i++) {
+        const t = te.touches.item(i)!;
+        const x = (t.clientX - rect.left) * sx;
+        const y = (t.clientY - rect.top) * sy;
+        if (hitBtn('left', x, y)) this.btnLeftDown = true;
+        else if (hitBtn('right', x, y)) this.btnRightDown = true;
+        else if (hitBtn('shoot', x, y)) this.btnShootDown = true;
+      }
       let inShootCorner = false;
       for (let i = 0; i < te.touches.length; i++) {
         const t = te.touches.item(i)!;
         const x = (t.clientX - rect.left) * sx;
         const y = (t.clientY - rect.top) * sy;
-        if (x > cw * 0.7 && y > ch * 0.6) { inShootCorner = true; break; }
+        const shootRight = !this.lefty;
+        const inCorner = shootRight ? (x > cw * 0.7 && y > ch * 0.6) : (x < cw * 0.3 && y > ch * 0.6);
+        if (inCorner) { inShootCorner = true; break; }
       }
-      if (te.touches.length >= 2 || inShootCorner) {
+      if (te.touches.length >= 2 || inShootCorner || this.btnShootDown) {
         const baseCd = 0.35;
         if (this.p1.fireCooldown <= 0) {
           this.fireBullet(this.p1, 'p1', engine);
           this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
         }
+        this.touchShootHeld = true;
         return;
+      }
+      // Double-tap bottom-left corner toggles lefty
+      if (te.touches.length === 1) {
+        const t = te.touches.item(0)!;
+        const x = (t.clientX - rect.left) * sx;
+        const y = (t.clientY - rect.top) * sy;
+        if (x < cw * 0.2 && y > ch * 0.8) {
+          const now = performance.now();
+          if (now - this.lastLeftCornerTap < 500) {
+            this.lefty = !this.lefty; this.toast = { text: `Left-handed ${this.lefty ? 'ON' : 'OFF'}`, t: 2.2 };
+            try { localStorage.setItem('lefty', this.lefty ? '1' : '0'); } catch {}
+          }
+          this.lastLeftCornerTap = now;
+        }
       }
       // Otherwise tap = flap
       Physics.jump(this.p1); Audio.flap();
+      try { navigator.vibrate?.(10); } catch {}
       this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
     };
-    engine.canvas.ontouchstart = (te: TouchEvent) => { calcMobileMove(te); onTouch(te); };
-    engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); };
-    engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); };
+    engine.canvas.ontouchstart = (te: TouchEvent) => { te.preventDefault(); calcMobileMove(te); onTouch(te); };
+    engine.canvas.ontouchmove = (te: TouchEvent) => { te.preventDefault(); calcMobileMove(te); };
+    engine.canvas.ontouchend = (te: TouchEvent) => { te.preventDefault(); calcMobileMove(te); this.touchShootHeld = false; };
   }
 
   dispose(): void {
@@ -298,19 +360,41 @@ export class VersusOnline implements IScene {
     // local input
     if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) {
       Physics.jump(this.p1); Audio.flap();
+      try { navigator.vibrate?.(10); } catch {}
       // Spark burst on flap
       this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
     }
-  const dir = engine.input.getMovementDirection();
+    // Gamepad support
+    const pads = (navigator as any).getGamepads ? (navigator as any).getGamepads() : [];
+    const pad = pads && pads[0];
+    let padX = 0;
+    if (pad && pad.connected) {
+      const ax = (pad.axes && pad.axes[0]) || 0;
+      const dead = 0.2; padX = Math.abs(ax) > dead ? ax : 0;
+      // A (0) flap on press
+      const buttons = pad.buttons || [];
+      const prev = this.prevPadButtons;
+      const isPressed = (i:number) => !!(buttons[i] && buttons[i].pressed);
+      const wasPressed = (i:number) => !!(prev[i]);
+      // Flap on rising edge of A / Cross
+      if (isPressed(0) && !wasPressed(0)) { Physics.jump(this.p1); Audio.flap(); try { navigator.vibrate?.(10); } catch {} }
+      // Shoot when B(1) or X(2) held
+      if (isPressed(1) || isPressed(2)) this.shootingHeld = true; else if (!isPressed(1) && !isPressed(2)) this.shootingHeld = false;
+      // Store current
+      this.prevPadButtons = buttons.map((b:any)=>!!b.pressed);
+    }
+    const dir = engine.input.getMovementDirection();
   const wasdX = (engine.input as any).getWASDHorizontal ? (engine.input as any).getWASDHorizontal() : 0;
-  this.p1.vx = (dir.x + wasdX + this.mobileMoveX) * 80;
-    // shooting
+    const btnX = (this.btnRightDown ? 1 : 0) - (this.btnLeftDown ? 1 : 0);
+    this.p1.vx = (dir.x + wasdX + this.mobileMoveX + btnX + padX) * 80;
+    // shooting (hold supported for mouse, keyboard, and touch)
     const baseCd = 0.35; // seconds
-    if (engine.input.wasPressed('ShiftLeft') || engine.input.wasPressed('KeyF')) {
-      if (this.p1.fireCooldown <= 0) {
-        this.fireBullet(this.p1, 'p1', engine);
-        this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
-      }
+    const shootKeysDown = engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || engine.input.isDown('KeyJ') || engine.input.isDown('ShiftLeft') || engine.input.isDown('KeyF');
+    const wantShoot = this.shootingHeld || this.touchShootHeld || !!shootKeysDown;
+    if (wantShoot && this.p1.fireCooldown <= 0) {
+      this.fireBullet(this.p1, 'p1', engine);
+      try { navigator.vibrate?.(5); } catch {}
+      this.p1.fireCooldown = baseCd * (this.isRapid() ? 0.55 : 1);
     }
     Physics.applyGravity(this.p1, dt); this.p1.update(dt);
     // bounds
@@ -358,6 +442,8 @@ export class VersusOnline implements IScene {
 
     this.particles.update(dt);
     this.remoteParticles.update(dt);
+  // Decrease hint timer
+  this.hintT = Math.max(0, this.hintT - dt);
 
     // Spawn pipes; leader sends spawn events, follower consumes them above
     this.timeToNext -= dt;
@@ -524,6 +610,50 @@ export class VersusOnline implements IScene {
   ctx.fillStyle = color2;
   ctx.beginPath(); ctx.arc(16, engine.canvas.height - 12, 5 * pulse2, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
+    // Touch on-screen buttons
+    if (this.isTouch) {
+      // Ensure rects are sized
+      const w = engine.canvas.width, h = engine.canvas.height;
+      const size = Math.max(60, Math.min(120, Math.floor(Math.min(w, h) * 0.14)));
+      const pad = 24;
+      this.btnRects = {
+        left:  { x: pad, y: h - size - pad, w: size, h: size },
+        right: { x: pad + size + 16, y: h - size - pad, w: size, h: size },
+        shoot: { x: (this.lefty ? pad : (w - size - pad)), y: h - size - pad, w: size, h: size },
+      };
+      const drawBtn = (r:{x:number,y:number,w:number,h:number}, active:boolean, label: 'L'|'R'|'S') => {
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = active ? '#58a6ff' : '#0f172a';
+        ctx.strokeStyle = '#58a6ff88';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.roundRect(r.x, r.y, r.w, r.h, 16);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#e8e8f0';
+        ctx.font = '700 28px system-ui';
+        const glyph = label === 'L' ? '\u25C0' : (label === 'R' ? '\u25B6' : '\u25CF');
+        const tw = ctx.measureText(glyph).width;
+        ctx.fillText(glyph, r.x + (r.w - tw) / 2, r.y + r.h / 2 + 10);
+        ctx.restore();
+      };
+      drawBtn(this.btnRects.left, this.btnLeftDown, 'L');
+      drawBtn(this.btnRects.right, this.btnRightDown, 'R');
+      drawBtn(this.btnRects.shoot, this.btnShootDown || this.touchShootHeld, 'S');
+    }
+    // Brief controls hint
+    if (this.hintT > 0) {
+      const a = Math.min(0.8, this.hintT / 4);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#00000088';
+      ctx.fillRect(20, 70, 560, 56);
+      ctx.fillStyle = '#e8e8f0';
+      ctx.font = '600 16px system-ui';
+      ctx.fillText('Flap: Click/Space/ArrowUp • Move: ←/→ or A/D • Shoot: Right Click or Ctrl/J (hold)', 28, 100);
+      ctx.restore();
+    }
     // Toasts
     if (this.toast) {
       this.toast.t -= 1/60;
