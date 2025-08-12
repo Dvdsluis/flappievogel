@@ -25,9 +25,6 @@ resource wps 'Microsoft.SignalRService/webPubSub@2024-03-01' = {
   }
   properties: {
     publicNetworkAccess: 'Enabled'
-    networkACLs: {
-      defaultAction: 'Allow'
-    }
   }
 }
 
