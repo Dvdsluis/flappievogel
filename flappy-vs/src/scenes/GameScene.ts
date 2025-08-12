@@ -12,6 +12,7 @@ import { Enemy } from '../entities/Enemy';
 import { PowerUp } from '../entities/PowerUp';
 import { Scoreboard } from '../game/scoreboard';
 import { Settings } from '../game/settings';
+import { POWERUPS, pickPowerUp } from '../game/powerups';
 
 export class GameScene implements IScene {
     player = new Player(80, 150, 26, 26);
@@ -379,8 +380,7 @@ export class GameScene implements IScene {
         }
     this.powerTimer -= gdt;
         if (this.powerTimer <= 0) {
-            const types: Array<PowerUp['type']> = ['heal','rapid','shield','multishot','bigshot','slowmo','magnet'];
-            const type = types[(Math.random() * types.length) | 0];
+            const type = pickPowerUp(this.score);
             this.powerUps.push(new PowerUp(engine.canvas.width + 20, 80 + Math.random() * (canvasH - 160), type));
             this.powerTimer = 8 + Math.random() * 6;
         }
