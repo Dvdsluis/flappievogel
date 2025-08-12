@@ -13,6 +13,8 @@ export class TitleScene implements IScene {
     private modalCreateBtn: {x:number,y:number,w:number,h:number} | null = null;
     private modalJoinBtn: {x:number,y:number,w:number,h:number} | null = null;
     private modalCancelBtn: {x:number,y:number,w:number,h:number} | null = null;
+    private shareRoomCode: string | null = null;
+    private shareRoomName: string | null = null;
     private launchOnline(engine: GameEngine) { this.onlineModalOpen = true; }
     // clickable button hit boxes
     private btnS: {x:number,y:number,w:number,h:number} | null = null;
@@ -24,6 +26,17 @@ export class TitleScene implements IScene {
     }
     init(engine: GameEngine): void {
         engine.canvas.focus();
+        // Deep-link: /?room=abcd[&name=Foo]
+        try {
+            const url = new URL(window.location.href);
+            const prm = url.searchParams.get('room');
+            const nm = url.searchParams.get('name');
+            if (prm) {
+                this.shareRoomCode = prm.toLowerCase();
+                if (nm) this.shareRoomName = nm;
+                this.onlineModalOpen = true;
+            }
+        } catch {}
         // Mobile-friendly: tap to start Singleplayer, two-finger tap for Versus
         let started = false;
         const cleanup = () => {
@@ -59,21 +72,42 @@ export class TitleScene implements IScene {
                     const hit = (b: any) => b && x>=b.x && x<=b.x+b.w && y>=b.y && y<=b.y+b.h;
                     if (hit(this.modalCreateBtn)) {
                         // Prompt for name then create room
-                        const current = Scoreboard.getPlayerName() || 'Anon';
+                        const current = Scoreboard.getPlayerName() || this.shareRoomName || 'Anon';
                         const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
                         Scoreboard.setPlayerName(name);
                         const rid = Math.random().toString(36).slice(2, 6).toUpperCase();
-                        if (typeof window !== 'undefined') { try { window.alert(`Room code: ${rid}\nShare this code with your friend to join.`);} catch {} }
+                        // Build invite link and try to copy
+                        try {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('room', rid.toLowerCase());
+                            url.searchParams.delete('name');
+                            const invite = url.toString();
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                (async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(invite);
+                                        try { window.alert(`Room code: ${rid}\nInvite link copied to clipboard!\n${invite}`);} catch {}
+                                    } catch {
+                                        try { window.alert(`Room code: ${rid}\nShare this link:\n${invite}`);} catch {}
+                                    }
+                                })();
+                            } else {
+                                try { window.alert(`Room code: ${rid}\nShare this link:\n${invite}`);} catch {}
+                            }
+                        } catch {}
                         if (started) return; started = true; cleanup();
                         engine.setScene(new VersusOnline(rid.toLowerCase(), name));
                         return;
                     }
                     if (hit(this.modalJoinBtn)) {
-                        const current = Scoreboard.getPlayerName() || 'Anon';
+                        const current = Scoreboard.getPlayerName() || this.shareRoomName || 'Anon';
                         const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
                         Scoreboard.setPlayerName(name);
-                        const code = typeof window !== 'undefined' ? window.prompt('Enter room code to join', '') : '';
-                        const room = (code || '').trim();
+                        let room = this.shareRoomCode || '';
+                        if (!room) {
+                            const code = typeof window !== 'undefined' ? window.prompt('Enter room code to join', '') : '';
+                            room = (code || '').trim();
+                        }
                         if (!room) { this.onlineModalOpen = false; return; }
                         if (started) return; started = true; cleanup();
                         engine.setScene(new VersusOnline(room.toLowerCase(), name));
@@ -222,9 +256,9 @@ export class TitleScene implements IScene {
         ctx.beginPath();
         ctx.roundRect(cardX, cardY, cardW, 150, 14);
         ctx.fill();
-        ctx.fillStyle = '#cdd9e5';
-        ctx.font = '700 22px system-ui';
-        ctx.fillText('Play', cardX + 16, cardY + 16);
+    ctx.fillStyle = '#cdd9e5';
+    ctx.font = '700 22px system-ui';
+    ctx.fillText('Play', cardX + 16, cardY + 16);
         // Buttons (dynamically sized and centered)
     const gap = 18; const btnH = 44; const pad = 16; const count = 3;
     const btnW = Math.floor((cardW - pad * 2 - gap * (count - 1)) / count);
@@ -353,7 +387,8 @@ export class TitleScene implements IScene {
             ctx.fillText('Online Match', mx + 16, my + 16);
             ctx.font = '500 14px system-ui';
             ctx.fillStyle = '#94a3b8';
-            ctx.fillText('Create a room to host, or join with a code from a friend.', mx + 16, my + 44);
+            const helper = this.shareRoomCode ? `You were invited to room ${this.shareRoomCode.toUpperCase()}. Join to continue.` : 'Create a room to host, or join with a code from a friend.';
+            ctx.fillText(helper, mx + 16, my + 44);
             // buttons
             const bw = (mw - 16*3) / 2;
             const bh = 40;
@@ -372,7 +407,8 @@ export class TitleScene implements IScene {
             ctx.lineWidth = 3;
             ctx.beginPath(); ctx.roundRect(mx + 16*2 + bw, byBtn, bw, bh, 10); ctx.fill(); ctx.stroke();
             ctx.fillStyle = '#e8e8f0'; ctx.font = '600 16px system-ui';
-            ctx.fillText('Join Room', mx + 16*2 + bw + 14, byBtn + 26);
+            const joinText = this.shareRoomCode ? `Join Room ${this.shareRoomCode.toUpperCase()}` : 'Join Room';
+            ctx.fillText(joinText, mx + 16*2 + bw + 14, byBtn + 26);
             this.modalJoinBtn = { x: mx + 16*2 + bw, y: byBtn, w: bw, h: bh };
             // Cancel link
             ctx.fillStyle = '#9cc9ff'; ctx.font = '600 14px system-ui';
