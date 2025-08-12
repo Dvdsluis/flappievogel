@@ -124,34 +124,45 @@ export class TitleScene implements IScene {
 
     // Floating centered title
     const bob = Math.sin(this.t * 2) * 6;
-    ctx.fillStyle = '#e8e8f0';
     ctx.textBaseline = 'top';
-    const title = 'Crappy Bird Extreme';
-    ctx.font = '800 64px system-ui, ui-sans-serif, -apple-system, Segoe UI';
+    const title = 'CrappBird';
+    ctx.font = '900 72px system-ui, ui-sans-serif, -apple-system, Segoe UI';
     const tw = ctx.measureText(title).width;
     const tx = Math.max(24, (w - tw) / 2);
-    const ty = 60 + bob;
+    const ty = 56 + bob;
+    // Title gradient and glow
+    const tg = ctx.createLinearGradient(tx, ty, tx, ty + 72);
+    tg.addColorStop(0, '#e6f0ff');
+    tg.addColorStop(1, '#9cc9ff');
+    ctx.save();
+    ctx.shadowColor = '#3b82f6aa';
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = tg;
     ctx.fillText(title, tx, ty);
-
+    ctx.restore();
     // Accent underline
     ctx.strokeStyle = '#58a6ff';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(tx, ty + 64 + 8);
-    ctx.lineTo(tx + Math.min(520, tw * 0.6), ty + 64 + 8);
+    ctx.moveTo(tx, ty + 72 + 6);
+    ctx.lineTo(tx + Math.min(520, tw * 0.65), ty + 72 + 6);
     ctx.stroke();
 
-    // Subtitle
-    ctx.font = '700 20px system-ui';
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillText('yoloswag edition', tx + 4, ty + 64 + 28);
+        // Vignette for depth
+        ctx.save();
+        const vg = ctx.createRadialGradient(w/2, h/2, Math.min(w,h)*0.2, w/2, h/2, Math.max(w,h)*0.6);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,0.35)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
 
         // Cards with options
         // Play buttons card (centered)
         const cardW = Math.min(560, w - 64);
         const cardY = 170;
         const cardX = (w - cardW) / 2;
-        ctx.fillStyle = '#0f172acc';
+        ctx.fillStyle = '#0f172ae6';
         ctx.beginPath();
         ctx.roundRect(cardX, cardY, cardW, 150, 14);
         ctx.fill();
@@ -163,7 +174,7 @@ export class TitleScene implements IScene {
     const bx = cardX + 16, by = cardY + 56;
         const drawBtn = (x:number, y:number, label:string) => {
             ctx.fillStyle = '#15223f';
-            ctx.strokeStyle = '#58a6ff88';
+            ctx.strokeStyle = '#58a6ffaa';
             ctx.lineWidth = 3;
             ctx.beginPath(); ctx.roundRect(x, y, btnW, btnH, 10); ctx.fill(); ctx.stroke();
             ctx.fillStyle = '#e8e8f0'; ctx.font = '600 18px system-ui';
@@ -256,9 +267,9 @@ export class TitleScene implements IScene {
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 3);
         ctx.save();
         ctx.globalAlpha = 0.6 + 0.4 * pulse;
-        ctx.fillStyle = '#58a6ff';
+        ctx.fillStyle = '#7dd3fc';
         ctx.font = '700 18px system-ui';
-    const prompt = 'Tap to start • Starts easy: wider gaps, slower pipes; difficulty ramps up. Two-finger tap for Versus (S/V)';
+    const prompt = 'Tap to start • Starts easy, ramps up • Two-finger tap for Versus (S/V)';
     const pw = ctx.measureText(prompt).width;
     ctx.fillText(prompt, Math.max(20, (w - pw) / 2), h - 60);
         ctx.restore();
