@@ -32,6 +32,7 @@ export class VersusOnline implements IScene {
   private bothReady = false;
   private presenceAccum = 0;
   private myId: string | null = null;
+  private lastMsgAt = 0; // timestamp of last received message for heartbeat
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -48,6 +49,7 @@ export class VersusOnline implements IScene {
   const myId = this.rt.id; this.myId = myId;
   // Receive first to avoid missing early presence
     this.rt.onMessage((m: RTMessage) => {
+      this.lastMsgAt = performance.now();
       if (m.type === 'state' && m.id !== myId) {
         this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
         if (this.remoteHistory.length > 30) this.remoteHistory.shift();
@@ -119,6 +121,7 @@ export class VersusOnline implements IScene {
       this.toast = { text: 'Online: reconnected', t: 2.5 };
       // rewire handlers
       this.rt.onMessage((m: RTMessage) => {
+        this.lastMsgAt = performance.now();
         if (m.type === 'state' && m.id !== myId) {
           this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
           if (this.remoteHistory.length > 30) this.remoteHistory.shift();
@@ -225,7 +228,7 @@ export class VersusOnline implements IScene {
       // Waiting room screen
       ctx.fillStyle = '#e8e8f0';
       ctx.font = '700 24px system-ui';
-      const msg = this.bothReady ? 'Found opponent! Starting…' : `Waiting in room ${this.roomId}…`;
+  const msg = this.bothReady ? 'Found opponent! Starting…' : `Waiting in room ${this.roomId}…`;
       const w = ctx.measureText(msg).width;
       ctx.fillText(msg, Math.max(20, (engine.canvas.width - w)/2), 120);
       ctx.font = '600 14px system-ui';
@@ -233,6 +236,25 @@ export class VersusOnline implements IScene {
       const sub = 'Share the code with your friend. Game starts when they join.';
       const sw = ctx.measureText(sub).width;
       ctx.fillText(sub, Math.max(20, (engine.canvas.width - sw)/2), 150);
+  // Connected players indicator
+  const players = 1 + (this.remoteId ? 1 : 0);
+  const info = `Connected players: ${players}/2`;
+  ctx.fillStyle = '#cdd9e5'; ctx.font = '700 14px system-ui';
+  const iw = ctx.measureText(info).width;
+  const ix = Math.max(20, (engine.canvas.width - iw)/2);
+  const iy = 180;
+  ctx.fillText(info, ix + 18, iy);
+  // Heartbeat dot next to info
+  const now = performance.now();
+  const age = now - this.lastMsgAt;
+  let color = '#ef4444'; // red (stale)
+  if (age < 2000) color = '#22c55e'; // green
+  else if (age < 5000) color = '#facc15'; // yellow
+  const pulse = 0.6 + 0.4 * Math.sin(now / 250);
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(ix + 8, iy - 4, 5 * pulse, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
     }
     this.renderer.drawPlayer(this.p1, '#58a6ff');
     this.renderer.drawPlayer(this.p2, '#ff7b72');
@@ -246,7 +268,20 @@ export class VersusOnline implements IScene {
   // Connection overlay
   ctx.fillStyle = '#94a3b8'; ctx.font = '600 12px system-ui';
   const role = this.isLeader ? 'Leader' : 'Follower';
-  ctx.fillText(`Online • Room ${this.roomId} • ${role}`, 16, engine.canvas.height - 8);
+  const players = 1 + (this.remoteId ? 1 : 0);
+  const overlay = `Online • Room ${this.roomId} • ${role} • Players ${players}/2`;
+  ctx.fillText(overlay, 32, engine.canvas.height - 8);
+  // Heartbeat dot at bottom-left
+  const now2 = performance.now();
+  const age2 = now2 - this.lastMsgAt;
+  let color2 = '#ef4444';
+  if (age2 < 2000) color2 = '#22c55e';
+  else if (age2 < 5000) color2 = '#facc15';
+  const pulse2 = 0.6 + 0.4 * Math.sin(now2 / 250);
+  ctx.save();
+  ctx.fillStyle = color2;
+  ctx.beginPath(); ctx.arc(16, engine.canvas.height - 12, 5 * pulse2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
     // Toasts
     if (this.toast) {
       this.toast.t -= 1/60;
