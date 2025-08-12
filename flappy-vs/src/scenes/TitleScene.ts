@@ -8,6 +8,27 @@ import { Settings } from '../game/settings';
 
 export class TitleScene implements IScene {
     private t = 0;
+    // Helper: launch online with create/join flow
+    private launchOnline(engine: GameEngine) {
+        const current = Scoreboard.getPlayerName() || 'Anon';
+        const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
+        Scoreboard.setPlayerName(name);
+        // Ask whether to create or join
+        const create = typeof window !== 'undefined' ? window.confirm('Online match:\n\nCreate a room?\nClick OK to Create, or Cancel to Join an existing room.') : true;
+        if (create) {
+            const rid = Math.random().toString(36).slice(2, 6).toUpperCase();
+            if (typeof window !== 'undefined') {
+                try { window.alert(`Room code: ${rid}\nShare this code with your friend to join.`); } catch {}
+            }
+            engine.setScene(new VersusOnline(rid.toLowerCase(), name));
+        } else {
+            const code = typeof window !== 'undefined' ? window.prompt('Enter room code to join', '') : '';
+            if (!code) return; // aborted
+            const room = code.trim();
+            if (!room) return;
+            engine.setScene(new VersusOnline(room.toLowerCase(), name));
+        }
+    }
     // clickable button hit boxes
     private btnS: {x:number,y:number,w:number,h:number} | null = null;
     private btnV: {x:number,y:number,w:number,h:number} | null = null;
@@ -28,16 +49,11 @@ export class TitleScene implements IScene {
             document.removeEventListener('pointerdown', onDocPointerDown as any);
             document.removeEventListener('click', onDocClick as any);
         };
-        const startNow = (versus: boolean, online = false) => {
+    const startNow = (versus: boolean, online = false) => {
             if (started) return; started = true; cleanup();
             if (versus && online) {
-                // Prompt for room & name
-                const current = Scoreboard.getPlayerName() || 'Anon';
-                const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
-                Scoreboard.setPlayerName(name);
-                const rid = Math.random().toString(36).slice(2, 6);
-                const room = typeof window !== 'undefined' ? (window.prompt('Room code (share with friend)', rid) || rid) : rid;
-                engine.setScene(new VersusOnline(room, name));
+        // Online flow: create or join room
+        this.launchOnline(engine);
             } else {
                 engine.setScene(versus ? new VersusScene() : new GameScene());
             }
@@ -89,14 +105,7 @@ export class TitleScene implements IScene {
         // Scene transitions and toggles
         if (engine.input.wasPressed('KeyS')) engine.setScene(new GameScene());
         if (engine.input.wasPressed('KeyV')) engine.setScene(new VersusScene());
-        if (engine.input.wasPressed('KeyO')) {
-            const current = Scoreboard.getPlayerName() || 'Anon';
-            const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
-            Scoreboard.setPlayerName(name);
-            const rid = Math.random().toString(36).slice(2, 6);
-            const room = typeof window !== 'undefined' ? (window.prompt('Room code (share with friend)', rid) || rid) : rid;
-            engine.setScene(new VersusOnline(room, name));
-        }
+    if (engine.input.wasPressed('KeyO')) { this.launchOnline(engine); }
     if (engine.input.wasPressed('KeyM')) Audio.muted = !Audio.muted;
     if (engine.input.wasPressed('KeyR')) Settings.toggleReducedMotion();
     if (engine.input.wasPressed('KeyC')) Scoreboard.clear();
@@ -233,7 +242,7 @@ export class TitleScene implements IScene {
         y += 28;
     ctx.fillText('Versus (Local): P1 = Arrows + Space • P2 = W (flap), S (nudge down)', cX + 16, y);
         y += 28;
-    ctx.fillText(`Online: O — enter room code and share it • Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
+    ctx.fillText(`Online: O — create or join room • Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
 
         // Power-ups quick guide
         const pY = cY + 170;
