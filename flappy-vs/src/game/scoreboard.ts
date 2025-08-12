@@ -1,6 +1,7 @@
-export type ScoreEntry = { score: number; date: number };
+export type ScoreEntry = { score: number; date: number; name?: string };
 
 const KEY = 'scores:v1';
+const NAME_KEY = 'playerName';
 
 function load(): ScoreEntry[] {
   try {
@@ -9,7 +10,7 @@ function load(): ScoreEntry[] {
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
     return arr
-      .map((e: any) => ({ score: Number(e.score) || 0, date: Number(e.date) || Date.now() }))
+      .map((e: any) => ({ score: Number(e.score) || 0, date: Number(e.date) || Date.now(), name: typeof e.name === 'string' ? e.name : undefined }))
       .filter((e: ScoreEntry) => e.score >= 0 && Number.isFinite(e.date));
   } catch {
     return [];
@@ -23,9 +24,10 @@ function save(list: ScoreEntry[]) {
 }
 
 export const Scoreboard = {
-  addScore(score: number, when: number = Date.now()) {
+  addScore(score: number, when: number = Date.now(), name?: string) {
     const list = load();
-    list.push({ score: Math.max(0, Math.floor(score)), date: when });
+    const cleanName = (name ?? localStorage.getItem(NAME_KEY) ?? 'Anon').toString().slice(0, 18).trim() || 'Anon';
+    list.push({ score: Math.max(0, Math.floor(score)), date: when, name: cleanName });
     // sort desc by score, then recent first
     list.sort((a, b) => (b.score - a.score) || (b.date - a.date));
     // cap
@@ -39,5 +41,11 @@ export const Scoreboard = {
   },
   clear() {
     save([]);
+  },
+  getPlayerName(): string | null {
+    try { return localStorage.getItem(NAME_KEY); } catch { return null; }
+  },
+  setPlayerName(name: string) {
+    try { localStorage.setItem(NAME_KEY, (name || '').toString().slice(0, 18).trim() || 'Anon'); } catch {}
   }
 };

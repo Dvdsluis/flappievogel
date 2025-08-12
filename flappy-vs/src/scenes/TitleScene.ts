@@ -162,26 +162,27 @@ export class TitleScene implements IScene {
         y += 28;
     ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
 
-        // Top scores
+        // Top scores (bottom center)
         const top = Scoreboard.getTop(5);
         if (top.length) {
-            const boxW = 280;
-            const boxH = 28 + top.length * 22 + 16;
-            const bx = Math.max(w - boxW - 24, 24);
-            const by = 24;
+            const boxW = Math.min(420, w - 40);
+            const boxH = 28 + top.length * 22 + 20;
+            const bx = (w - boxW) / 2;
+            const by = h - boxH - 80;
             ctx.fillStyle = '#0f172acc';
-            ctx.fillRect(bx, by, boxW, boxH);
+            ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 10); ctx.fill();
             ctx.fillStyle = '#cdd9e5';
             ctx.font = '700 16px system-ui';
             ctx.fillText('Top Scores', bx + 12, by + 20);
             ctx.font = '500 14px system-ui';
             for (let i = 0; i < top.length; i++) {
                 const s = top[i];
-                ctx.fillText(`${i + 1}. ${s.score}`, bx + 12, by + 44 + i * 22);
+                const label = `${i + 1}. ${(s.name || 'Anon').slice(0,18)} — ${s.score}`;
+                ctx.fillText(label, bx + 12, by + 44 + i * 22);
             }
             ctx.font = '400 12px system-ui';
             ctx.fillStyle = '#94a3b8';
-            ctx.fillText('Press C to clear', bx + 12, by + boxH - 10);
+            ctx.fillText('Press C to clear • Name is saved locally', bx + 12, by + boxH - 10);
         }
 
         // Pulse prompt

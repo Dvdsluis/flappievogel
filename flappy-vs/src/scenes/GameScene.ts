@@ -56,7 +56,7 @@ export class GameScene implements IScene {
     this.speed = 120;
     // Reset player to visible starting position and defaults
     this.player.x = 80;
-    this.player.y = 150;
+    this.player.y = Math.max(0, (engine.canvas.height - this.player.height) * 0.5);
     this.player.vx = 0;
     this.player.vy = 0;
     this.player.hp = this.player.maxHp = 3;
@@ -299,7 +299,13 @@ export class GameScene implements IScene {
                     this.gameOver = true;
                     this.best = Math.max(this.best, this.score);
                     try { localStorage.setItem('best', String(this.best)); } catch {}
-                    Scoreboard.addScore(this.score);
+                    // Ask for player name (prefill with stored one); store for later
+                    let name = Scoreboard.getPlayerName() || '';
+                    try {
+                        const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null;
+                        if (entered != null) { name = entered; Scoreboard.setPlayerName(name); }
+                    } catch {}
+                    Scoreboard.addScore(this.score, Date.now(), name);
                 }
             }
         }
@@ -426,7 +432,9 @@ export class GameScene implements IScene {
                 this.player.hp -= 1; Audio.hit(); this.particles.burst(e.x+e.width/2,e.y+e.height/2,10,'#ff7b72aa'); e.x = -9999;
                 if (this.player.hp <= 0) {
                     this.gameOver = true; this.best = Math.max(this.best, this.score); try { localStorage.setItem('best', String(this.best)); } catch {}
-                    Scoreboard.addScore(this.score);
+                    let name = Scoreboard.getPlayerName() || '';
+                    try { const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null; if (entered != null) { name = entered; Scoreboard.setPlayerName(name); } } catch {}
+                    Scoreboard.addScore(this.score, Date.now(), name);
                 }
             }
         }
