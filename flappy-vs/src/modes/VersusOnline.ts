@@ -236,6 +236,14 @@ export class VersusOnline implements IScene {
       const sub = 'Share the code with your friend. Game starts when they join.';
       const sw = ctx.measureText(sub).width;
       ctx.fillText(sub, Math.max(20, (engine.canvas.width - sw)/2), 150);
+      // If there was a connection error, surface it
+      const err = this.rt?.getLastError?.();
+      if (err) {
+        ctx.fillStyle = '#fca5a5';
+        ctx.font = '600 13px system-ui';
+        const ew = ctx.measureText(err).width;
+        ctx.fillText(err, Math.max(20, (engine.canvas.width - ew)/2), 170);
+      }
   // Connected players indicator
   const players = 1 + (this.remoteId ? 1 : 0);
   const info = `Connected players: ${players}/2`;

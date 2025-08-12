@@ -17,17 +17,23 @@ export class Realtime {
   private onErr: Array<(e: any) => void> = [];
   private mode: 'azure' | 'local' = 'azure';
   private bc: BroadcastChannel | null = null;
+  private lastError: string | null = null;
 
   constructor(private negotiateUrl: string) {
     this.id = Math.random().toString(36).slice(2, 8);
   }
 
   async connect(roomId: string): Promise<void> {
-    this.group = `room:${roomId}`;
+    // Use safe characters for group names
+    this.group = `room_${roomId}`;
     try {
       const res = await fetch(this.negotiateUrl, { credentials: 'include' });
-      if (!res.ok) throw new Error('negotiate failed');
-      const { url } = await res.json();
+      if (!res.ok) {
+        const txt = await res.text().catch(()=>'');
+        this.lastError = `negotiate ${res.status}: ${txt?.slice(0,180)}`;
+        throw new Error(this.lastError);
+      }
+      const { url } = await res.json().catch(()=>({url:null} as any));
       if (!url) throw new Error('no url');
       const client = new WebPubSubClient(url);
       this.client = client;
@@ -43,11 +49,13 @@ export class Realtime {
       await client.joinGroup(this.group);
       this.connected = true;
     } catch (e) {
+      this.lastError = (e as any)?.message || String(e);
       // Local fallback only for localhost/dev
       const host = (typeof window !== 'undefined' && window.location.hostname) || '';
       const isLocal = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
       if (!isLocal) {
         // In production, surface the error to caller
+        this.onErr.forEach((f)=>f(e));
         throw e;
       }
       try {
@@ -59,6 +67,7 @@ export class Realtime {
         };
         this.connected = true;
       } catch (e2) {
+        this.onErr.forEach((f)=>f(e));
         throw e; // rethrow original negotiate error if BC not available
       }
     }
@@ -90,4 +99,5 @@ export class Realtime {
   }
 
   getTransport() { return this.mode; }
+  getLastError() { return this.lastError; }
 }
