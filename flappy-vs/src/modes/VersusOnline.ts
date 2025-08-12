@@ -30,6 +30,8 @@ export class VersusOnline implements IScene {
   private unloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
   private waiting = true;
   private bothReady = false;
+  private presenceAccum = 0;
+  private myId: string | null = null;
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -43,12 +45,8 @@ export class VersusOnline implements IScene {
       this.toast = { text: 'Online: failed to connect', t: 3 };
       return;
     }
-  const myId = this.rt.id;
-  // Show connected toast and status
-  this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
-  // Presence join and waiting room
-  this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
-    // Receive
+  const myId = this.rt.id; this.myId = myId;
+  // Receive first to avoid missing early presence
     this.rt.onMessage((m: RTMessage) => {
       if (m.type === 'state' && m.id !== myId) {
         this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
@@ -84,6 +82,10 @@ export class VersusOnline implements IScene {
         this.waiting = true; this.bothReady = false; this.remoteId = null;
       }
     });
+  // Show connected toast and status
+  this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
+  // Presence join and waiting room
+  this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
     this.rt.onDisconnected(() => {
       this.toast = { text: 'Online: disconnected', t: 3 };
       if (!this.reconnecting && this.retries < 2) {
@@ -96,6 +98,16 @@ export class VersusOnline implements IScene {
       try { this.rt?.send({ type: 'leave', id: myId, roomId: this.roomId }); } catch {}
     };
     window.addEventListener('beforeunload', this.unloadHandler);
+  }
+
+  dispose(): void {
+    try {
+      if (this.rt && this.myId) {
+        this.rt.send({ type: 'leave', id: this.myId, roomId: this.roomId });
+      }
+    } catch {}
+    try { if (this.unloadHandler) window.removeEventListener('beforeunload', this.unloadHandler); } catch {}
+    try { this.rt?.close(); } catch {}
   }
 
   private async reconnect(negotiateUrl: string) {
@@ -139,6 +151,14 @@ export class VersusOnline implements IScene {
   update(dt: number, engine: GameEngine) {
     if (this.paused) return;
     if (this.waiting) {
+      // Periodic presence while waiting so peers that joined late can see us
+      if (this.rt && this.myId) {
+        this.presenceAccum += dt;
+        if (this.presenceAccum >= 1.0) {
+          this.presenceAccum = 0;
+          this.rt.send({ type: 'join', id: this.myId, roomId: this.roomId, name: this.name });
+        }
+      }
       // Show simple waiting room background and hint via render()
       return;
     }
