@@ -2,6 +2,16 @@
 const { WebPubSubServiceClient } = require('@azure/web-pubsub');
 
 module.exports = async function (context, req) {
+  // Simple fallback: if a client URL is provided directly, return it.
+  const directUrl = process.env.WEB_PUBSUB_CLIENT_URL;
+  if (directUrl) {
+    context.res = {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: directUrl, hub: process.env.WEB_PUBSUB_HUB || 'game' })
+    };
+    return;
+  }
   const connStr = process.env.WEB_PUBSUB_CONNECTION_STRING; // optional full connection string
   const endpoint = process.env.WEB_PUBSUB_ENDPOINT; // e.g., https://<name>.webpubsub.azure.com
   const hub = process.env.WEB_PUBSUB_HUB || 'game';
