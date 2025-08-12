@@ -40,6 +40,7 @@ export class GameScene implements IScene {
     private hurtT = 0; // seconds remaining for hurt tint
     private combo = 0;
     private comboT = 0; // time left to keep combo alive
+    private ended = false; // prevent repeated game-over prompts on mobile
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -75,6 +76,7 @@ export class GameScene implements IScene {
     this.shakeT = 0;
     this.floats = [];
     this.lastGapCenter = null;
+    this.ended = false;
     // Reset touch button states
     this.btnLeftDown = this.btnRightDown = this.btnShootDown = false;
     this.restartRect = null;
@@ -302,19 +304,7 @@ export class GameScene implements IScene {
                 this.combo = 0; this.comboT = 0; // reset combo on hit
                 // brief invuln by pushing player left slightly
                 this.player.x -= 10;
-                if (this.player.hp <= 0) {
-                    this.gameOver = true;
-                    this.best = Math.max(this.best, this.score);
-                    try { localStorage.setItem('best', String(this.best)); } catch {}
-                    // Ask for player name (prefill with stored one); store for later
-                    let name = Scoreboard.getPlayerName() || '';
-                    try {
-                        const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null;
-                        if (entered != null) { name = entered; Scoreboard.setPlayerName(name); }
-                    } catch {}
-                    Scoreboard.addScore(this.score, Date.now(), name);
-                    this.playerName = name;
-                }
+                if (this.player.hp <= 0) this.finalizeGameOver();
             }
         }
 
@@ -444,13 +434,7 @@ export class GameScene implements IScene {
         for (const e of this.enemies) {
             if (hitRect(this.player.x,this.player.y,this.player.width,this.player.height, e.x,e.y,e.width,e.height)) {
                 this.player.hp -= 1; Audio.hit(); this.particles.burst(e.x+e.width/2,e.y+e.height/2,10,'#ff7b72aa'); e.x = -9999;
-                if (this.player.hp <= 0) {
-                    this.gameOver = true; this.best = Math.max(this.best, this.score); try { localStorage.setItem('best', String(this.best)); } catch {}
-                    let name = Scoreboard.getPlayerName() || '';
-                    try { const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null; if (entered != null) { name = entered; Scoreboard.setPlayerName(name); } } catch {}
-                    Scoreboard.addScore(this.score, Date.now(), name);
-                    this.playerName = name;
-                }
+                if (this.player.hp <= 0) this.finalizeGameOver();
             }
         }
 
@@ -474,6 +458,21 @@ export class GameScene implements IScene {
     for (const f of this.floats) { f.ttl -= dt; f.y += f.vy * dt; }
     this.floats = this.floats.filter(f => f.ttl > 0);
     this.hintT = Math.max(0, this.hintT - dt);
+    }
+
+    private finalizeGameOver() {
+        if (this.ended) return;
+        this.ended = true;
+        this.gameOver = true;
+        this.best = Math.max(this.best, this.score);
+        try { localStorage.setItem('best', String(this.best)); } catch {}
+        let name = Scoreboard.getPlayerName() || '';
+        try {
+            const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null;
+            if (entered != null) { name = entered; Scoreboard.setPlayerName(name); }
+        } catch {}
+        Scoreboard.addScore(this.score, Date.now(), name);
+        this.playerName = name;
     }
 
     render(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
