@@ -41,11 +41,27 @@ export class VersusOnline implements IScene {
   private trailAccum = 0;
   private particles = new Particles();
   private remoteParticles = new Particles();
+  // Visual & UX
+  private paletteIdx = 0;
+  private endBanner: { text: string; t: number } | null = null;
+  private hurtT = 0;
+  private scoreFlashT = 0;
+  private emotes: Array<{x:number,y:number,text:string,ttl:number,me:boolean}> = [];
+  private nameColorSelf = '#7cc1ff';
+  private nameColorOther = '#ff9da0';
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
   async init(engine: GameEngine) {
     this.renderer = new Renderer(engine.canvas, engine.ctx);
+    // Pick a palette per match
+    this.paletteIdx = Math.random() < 0.5 ? 0 : 1;
+    const palettes = [
+      { top: '#0f1630', bottom: '#0b1022' },
+      { top: '#0b2a3a', bottom: '#051a26' },
+    ];
+    const p = palettes[this.paletteIdx];
+    this.renderer.setPalette(p.top, p.bottom);
     const negotiateUrl = '/api/negotiate';
     this.rt = new Realtime(negotiateUrl);
     try {
@@ -81,8 +97,9 @@ export class VersusOnline implements IScene {
         if (this.isLeader && this.waiting) {
           // Leader schedules a synchronized start ~2s in the future
           setTimeout(() => {
-            const startAt = performance.now() + 2000;
-            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now(), startAt });
+            const delayMs = 2000;
+            const startAt = performance.now() + delayMs;
+            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now(), startAt, delayMs });
             this.startAt = startAt;
             this.waiting = false;
             this.starting = true;
@@ -90,15 +107,21 @@ export class VersusOnline implements IScene {
           }, 600);
         }
       } else if (m.type === 'start') {
-        // follower applies leader-provided startAt
-        const sa = (m as any).startAt as number | undefined;
-        this.startAt = typeof sa === 'number' ? sa : performance.now() + 1500;
+  // follower applies leader-provided startAt or delayMs
+  const sa = (m as any).startAt as number | undefined;
+  const delayMs = (m as any).delayMs as number | undefined;
+  if (typeof sa === 'number') this.startAt = sa; else this.startAt = performance.now() + (typeof delayMs === 'number' ? delayMs : 1500);
         this.waiting = false;
         this.starting = true;
         this.lastCountdownSecond = 4; // force first tick
       } else if (m.type === 'leave' && m.id !== myId) {
         this.toast = { text: 'Opponent left', t: 3 };
         this.waiting = true; this.bothReady = false; this.remoteId = null;
+      }
+      // Emotes
+      if ((m as any).type === 'emote' && (m as any).id !== myId) {
+        const rx = this.p2.x + this.p2.width/2, ry = this.p2.y - 12;
+        this.emotes.push({ x: rx, y: ry, text: (m as any).emoji || '👍', ttl: 1.6, me: false });
       }
     });
   // Show connected toast and status
@@ -212,7 +235,17 @@ export class VersusOnline implements IScene {
       // Spark burst on flap
       this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
     }
-    const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
+    // Emotes: 1 and 2 keys
+    if (engine.input.wasPressed('Digit1')) {
+      this.emotes.push({ x: this.p1.x + this.p1.width/2, y: this.p1.y - 12, text: '👍', ttl: 1.6, me: true });
+      this.rt?.send({ type: 'state', id: this.rt!.id, t: performance.now(), x: this.p1.x, y: this.p1.y, vy: this.p1.vy, score: this.s1, hp: this.p1.hp, name: this.name } as any);
+      (this.rt as any)?.send({ type: 'emote', id: this.rt?.id, roomId: this.roomId, emoji: '👍' } as any);
+    }
+    if (engine.input.wasPressed('Digit2')) {
+      this.emotes.push({ x: this.p1.x + this.p1.width/2, y: this.p1.y - 12, text: '😅', ttl: 1.6, me: true });
+      (this.rt as any)?.send({ type: 'emote', id: this.rt?.id, roomId: this.roomId, emoji: '😅' } as any);
+    }
+  const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
     Physics.applyGravity(this.p1, dt); this.p1.update(dt);
     // bounds
     const h = engine.canvas.height; this.p1.y = Math.max(0, Math.min(h - this.p1.height, this.p1.y));
@@ -279,6 +312,32 @@ export class VersusOnline implements IScene {
     }
     for (const o of this.obstacles) o.update(dt);
     this.obstacles = this.obstacles.filter((o) => !o.isOffScreen());
+    // Collisions and scoring similar to single-player
+    // collision with pipes for p1
+    for (const o of this.obstacles) {
+      if ((Physics as any).checkCollision && (Physics as any).checkCollision(this.p1, o)) {
+        this.p1.hp = Math.max(0, (this.p1.hp ?? 3) - 1);
+        this.hurtT = 0.3; Audio.hit();
+        if (this.p1.hp <= 0) {
+          this.paused = true;
+          const winlose = (this.s1 >= this.s2) ? 'You lose' : 'You win!'; // naive; can refine via finish message later
+          this.endBanner = { text: winlose, t: 2.5 };
+        }
+      }
+    }
+    // scoring when passing pipe centers (pairs at i, i+1)
+    for (let i = 0; i < this.obstacles.length; i += 2) {
+      const top = this.obstacles[i];
+      const centerX = top.x + top.width / 2;
+      if ((top as any).counted !== true && centerX < this.p1.x) {
+        (top as any).counted = true; this.s1 += 1; this.scoreFlashT = 0.25; Audio.score();
+      }
+    }
+    // FX timers
+    this.hurtT = Math.max(0, this.hurtT - dt);
+    this.scoreFlashT = Math.max(0, this.scoreFlashT - dt);
+    for (const e of this.emotes) e.ttl -= dt;
+    this.emotes = this.emotes.filter(e => e.ttl > 0);
   }
 
   render(ctx: CanvasRenderingContext2D, engine: GameEngine) {
@@ -333,7 +392,8 @@ export class VersusOnline implements IScene {
       const w = ctx.measureText(label).width;
       ctx.fillText(label, (engine.canvas.width - w)/2, engine.canvas.height * 0.35);
     }
-    this.renderer.drawPlayer(this.p1, '#58a6ff');
+  const p1Color = this.hurtT > 0 ? '#f87171' : '#58a6ff';
+  this.renderer.drawPlayer(this.p1, p1Color);
     this.renderer.drawPlayer(this.p2, '#ff7b72');
     // Render particles above players
     this.particles.render(ctx);
@@ -341,17 +401,27 @@ export class VersusOnline implements IScene {
     // draw obstacles
     for (const o of this.obstacles) this.renderer.drawObstacle(o);
     this.hud.render(ctx, this.s1, this.s2);
-  // Names above players
-  ctx.fillStyle = '#cdd9e5'; ctx.font = '700 12px system-ui';
-  if (this.name) ctx.fillText(this.name, this.p1.x, Math.max(12, this.p1.y - 6));
-  if (this.remoteName) ctx.fillText(this.remoteName, this.p2.x, Math.max(12, this.p2.y - 6));
+  // Names above players with color tags
+  ctx.font = '700 12px system-ui';
+  const drawName = (label: string, x: number, y: number, color: string) => {
+    const tx = x; const ty = Math.max(12, y);
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.roundRect(tx - 4, ty - 12, Math.max(20, ctx.measureText(label).width + 8), 14, 6); ctx.fill();
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(label, tx, ty - 2);
+    ctx.restore();
+  };
+  if (this.name) drawName(this.name, this.p1.x, this.p1.y - 6, this.nameColorSelf);
+  if (this.remoteName) drawName(this.remoteName, this.p2.x, this.p2.y - 6, this.nameColorOther);
   // Connection overlay
   ctx.fillStyle = '#94a3b8'; ctx.font = '600 12px system-ui';
   const role = this.isLeader ? 'Leader' : 'Follower';
   const players = 1 + (this.remoteId ? 1 : 0);
   const overlay = `Online • Room ${this.roomId} • ${role} • Players ${players}/2`;
   ctx.fillText(overlay, 32, engine.canvas.height - 8);
-  // Heartbeat dot at bottom-left
+  // Heartbeat dot + latency at bottom-left
   const now2 = performance.now();
   const age2 = now2 - this.lastMsgAt;
   let color2 = '#ef4444';
@@ -362,6 +432,30 @@ export class VersusOnline implements IScene {
   ctx.fillStyle = color2;
   ctx.beginPath(); ctx.arc(16, engine.canvas.height - 12, 5 * pulse2, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
+  // Latency label (approx = age of last msg)
+  ctx.fillStyle = '#94a3b8'; ctx.font = '600 12px system-ui';
+  const ms = Math.max(0, Math.min(9999, Math.round(age2)));
+  ctx.fillText(`${ms}ms`, 28, engine.canvas.height - 8);
+  // Emotes render
+  for (const e of this.emotes) {
+    const a = Math.max(0, Math.min(1, e.ttl / 1.6));
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#0f172acc';
+    ctx.beginPath(); ctx.roundRect(e.x - 10, e.y - 16, 24, 18, 8); ctx.fill();
+    ctx.fillStyle = '#e8e8f0'; ctx.font = '700 14px system-ui'; ctx.fillText(e.text, e.x - 4, e.y - 2);
+    ctx.restore();
+  }
+  // End-of-round ribbon
+  if (this.endBanner) {
+    this.endBanner.t -= 1/60;
+    const a = Math.max(0, Math.min(1, this.endBanner.t / 2.5));
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#0f172acc';
+    const w = 220, h = 48; const x = (engine.canvas.width - w)/2, y = 60;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 10); ctx.fill();
+    ctx.fillStyle = '#e8e8f0'; ctx.font = '800 20px system-ui';
+    const text = this.endBanner.text; const tw = ctx.measureText(text).width;
+    ctx.fillText(text, x + (w - tw)/2, y + 30);
+    ctx.restore();
+  }
     // Toasts
     if (this.toast) {
       this.toast.t -= 1/60;

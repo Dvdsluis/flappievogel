@@ -6,7 +6,7 @@ export type RTMessage =
   | { type: 'leave'; id: string; roomId: string }
   | { type: 'state'; id: string; t: number; x: number; y: number; vy: number; score: number; hp: number; name?: string }
   | { type: 'spawn'; id: string; t: number; w: number; gap: number; topH: number; speed: number }
-  | { type: 'start'; id: string; roomId: string; t: number; startAt?: number };
+  | { type: 'start'; id: string; roomId: string; t: number; startAt?: number; delayMs?: number };
 
 export class Realtime {
   private client: WebPubSubClient | null = null;
