@@ -2,16 +2,25 @@
 const { WebPubSubServiceClient } = require('@azure/web-pubsub');
 
 module.exports = async function (context, req) {
+  const connStr = process.env.WEB_PUBSUB_CONNECTION_STRING; // optional full connection string
   const endpoint = process.env.WEB_PUBSUB_ENDPOINT; // e.g., https://<name>.webpubsub.azure.com
   const hub = process.env.WEB_PUBSUB_HUB || 'game';
-  const key = process.env.WEB_PUBSUB_KEY; // primary key from Keys
+  const keyOrMaybeConn = process.env.WEB_PUBSUB_KEY; // primary key (preferred), or sometimes a full connection string by mistake
 
-  if (!endpoint || !key) {
-    context.res = { status: 500, jsonBody: { error: 'Missing WEB_PUBSUB_ENDPOINT or WEB_PUBSUB_KEY' } };
-    return;
-  }
   try {
-    const service = new WebPubSubServiceClient(endpoint, hub, { key });
+    let service;
+    if (connStr) {
+      service = new WebPubSubServiceClient(connStr, hub);
+    } else if (keyOrMaybeConn && /^endpoint=/i.test(String(keyOrMaybeConn))) {
+      // If WEB_PUBSUB_KEY actually contains a connection string
+      service = new WebPubSubServiceClient(keyOrMaybeConn, hub);
+    } else if (endpoint && keyOrMaybeConn) {
+      service = new WebPubSubServiceClient(endpoint, hub, { key: keyOrMaybeConn });
+    } else {
+      context.res = { status: 500, jsonBody: { error: 'Missing configuration. Provide WEB_PUBSUB_CONNECTION_STRING or (WEB_PUBSUB_ENDPOINT and WEB_PUBSUB_KEY).' } };
+      return;
+    }
+
     const token = await service.getClientAccessToken({
       roles: [
         'webpubsub.joinLeaveGroup',
@@ -21,9 +30,9 @@ module.exports = async function (context, req) {
       ],
       expiresIn: 60 * 60 // 1 hour
     });
-    context.res = { jsonBody: { url: token.url } };
+    context.res = { jsonBody: { url: token.url, hub } };
   } catch (e) {
-    context.log('negotiate error', e);
-    context.res = { status: 500, jsonBody: { error: 'negotiate failed' } };
+    context.log('negotiate error', e?.message || e);
+    context.res = { status: 500, jsonBody: { error: 'negotiate failed', detail: String(e?.message || e) } };
   }
 };
