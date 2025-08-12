@@ -36,6 +36,7 @@ export class GameScene implements IScene {
     // Visual feedback for scoring
     private floats: Array<{x:number,y:number,text:string,ttl:number,vy:number}> = [];
     private static readonly KILL_POINTS = 2;
+    private playerName: string | null = null;
     // Mobile support
     private mobileMoveX = 0; // -1..1 from touch zones
     private isTouch = 'ontouchstart' in window;
@@ -223,6 +224,7 @@ export class GameScene implements IScene {
     engine.canvas.ontouchmove = (te: TouchEvent) => { calcMobileMove(te); recomputeTouchButtons(te); };
     engine.canvas.ontouchend = (te: TouchEvent) => { calcMobileMove(te); recomputeTouchButtons(te); };
     try { const b = localStorage.getItem('best'); if (b) this.best = parseInt(b, 10) || 0; } catch {}
+    try { this.playerName = Scoreboard.getPlayerName(); } catch { this.playerName = null; }
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.paused = true; });
     }
 
@@ -306,6 +308,7 @@ export class GameScene implements IScene {
                         if (entered != null) { name = entered; Scoreboard.setPlayerName(name); }
                     } catch {}
                     Scoreboard.addScore(this.score, Date.now(), name);
+                    this.playerName = name;
                 }
             }
         }
@@ -435,6 +438,7 @@ export class GameScene implements IScene {
                     let name = Scoreboard.getPlayerName() || '';
                     try { const entered = typeof window !== 'undefined' ? window.prompt('Name for high score?', name || 'Anon') : null; if (entered != null) { name = entered; Scoreboard.setPlayerName(name); } } catch {}
                     Scoreboard.addScore(this.score, Date.now(), name);
+                    this.playerName = name;
                 }
             }
         }
@@ -468,6 +472,22 @@ export class GameScene implements IScene {
     for (const e of this.enemies) this.renderer.drawEnemy(e);
     for (const p of this.powerUps) this.renderer.drawPowerUp(p);
         this.renderer.drawPlayer(this.player, '#58a6ff');
+        // Player name label above character
+        if (this.playerName) {
+            const label = this.playerName.slice(0, 18);
+            const cx = this.player.x + this.player.width / 2;
+            let ty = this.player.y - 6;
+            if (ty < 14) ty = this.player.y + this.player.height + 14; // avoid clipping at top
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.font = '600 12px system-ui';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#00000077';
+            ctx.strokeText(label, cx, ty);
+            ctx.fillStyle = '#cdd9e5';
+            ctx.fillText(label, cx, ty);
+            ctx.restore();
+        }
     for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
         this.hud.render(ctx, this.score, undefined, this.player.hp);
