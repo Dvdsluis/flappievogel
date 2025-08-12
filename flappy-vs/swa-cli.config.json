@@ -1,0 +1,11 @@
+{
+	"configurations": {
+		"azd": {
+			"appLocation": ".",
+			"apiLocation": "api",
+			"outputLocation": "dist",
+			"appBuildCommand": "npm ci && npm run build",
+			"apiBuildCommand": "npm ci"
+		}
+	}
+}

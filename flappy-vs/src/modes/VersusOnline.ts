@@ -5,6 +5,7 @@ import { HUD } from '../entities/HUD';
 import { Renderer } from '../game/renderer';
 import { Physics } from '../game/physics';
 import { Audio } from '../game/audio';
+import { Particles } from '../game/particles';
 import { Realtime, RTMessage } from '../net/realtime';
 
 export class VersusOnline implements IScene {
@@ -33,6 +34,13 @@ export class VersusOnline implements IScene {
   private presenceAccum = 0;
   private myId: string | null = null;
   private lastMsgAt = 0; // timestamp of last received message for heartbeat
+  // Countdown + FX
+  private starting = false;
+  private startAt = 0; // ms timestamp
+  private lastCountdownSecond = 0;
+  private trailAccum = 0;
+  private particles = new Particles();
+  private remoteParticles = new Particles();
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -71,14 +79,23 @@ export class VersusOnline implements IScene {
         this.toast = { text: `${m.name || 'Opponent'} joined`, t: 2.5 };
         this.bothReady = true;
         if (this.isLeader && this.waiting) {
-          // leader sends start
+          // Leader schedules a synchronized start ~2s in the future
           setTimeout(() => {
-            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now() });
+            const startAt = performance.now() + 2000;
+            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now(), startAt });
+            this.startAt = startAt;
             this.waiting = false;
-          }, 800);
+            this.starting = true;
+            this.lastCountdownSecond = 4; // force first tick
+          }, 600);
         }
       } else if (m.type === 'start') {
+        // follower applies leader-provided startAt
+        const sa = (m as any).startAt as number | undefined;
+        this.startAt = typeof sa === 'number' ? sa : performance.now() + 1500;
         this.waiting = false;
+        this.starting = true;
+        this.lastCountdownSecond = 4; // force first tick
       } else if (m.type === 'leave' && m.id !== myId) {
         this.toast = { text: 'Opponent left', t: 3 };
         this.waiting = true; this.bothReady = false; this.remoteId = null;
@@ -165,8 +182,36 @@ export class VersusOnline implements IScene {
       // Show simple waiting room background and hint via render()
       return;
     }
+    // Pre-game synchronized countdown
+    if (this.starting) {
+      const now = performance.now();
+      const remain = Math.max(0, this.startAt - now);
+      const sec = Math.ceil(remain / 1000);
+      if (sec !== this.lastCountdownSecond) {
+        this.lastCountdownSecond = sec;
+        if (sec > 0) {
+          // beep high to low as it counts down
+          const f = 800 - (3 - Math.min(3, sec)) * 120;
+          Audio.beep(f, 0.08, 'triangle', 0.06);
+        } else {
+          Audio.beep(1000, 0.1, 'square', 0.07);
+        }
+      }
+      if (remain <= 0) {
+        this.starting = false;
+      } else {
+        // small ambient particles while waiting to go
+        this.particles.update(dt);
+        this.remoteParticles.update(dt);
+        return; // block gameplay until countdown ends
+      }
+    }
     // local input
-    if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) { Physics.jump(this.p1); Audio.flap(); }
+    if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) {
+      Physics.jump(this.p1); Audio.flap();
+      // Spark burst on flap
+      this.particles.burst(this.p1.x + this.p1.width * 0.2, this.p1.y + this.p1.height * 0.7, 10, '#9bd1ff');
+    }
     const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
     Physics.applyGravity(this.p1, dt); this.p1.update(dt);
     // bounds
@@ -200,6 +245,20 @@ export class VersusOnline implements IScene {
     } else if (a) { // hold last
       this.p2.x = a.x; this.p2.y = a.y; this.p2.vy = a.vy; this.s2 = a.score;
     }
+
+    // Soft exhaust-like trail for both players
+    this.trailAccum += dt;
+    const spawnTrail = (x:number, y:number, color:string) => {
+      this.particles.spawn(x, y, { vx: -40 + Math.random()*20, vy: 20 + Math.random()*20, size: 2.2, color: color+'cc', life: 0.35, g: 150 });
+    };
+    if (this.trailAccum >= 0.05) {
+      this.trailAccum = 0;
+      spawnTrail(this.p1.x - 4, this.p1.y + this.p1.height * 0.6, '#7cc1ff');
+      this.remoteParticles.spawn(this.p2.x - 4, this.p2.y + this.p2.height * 0.6, { vx: -30 + Math.random()*20, vy: 20 + Math.random()*15, size: 2.2, color: '#ff9da0cc', life: 0.35, g: 150 });
+    }
+
+    this.particles.update(dt);
+    this.remoteParticles.update(dt);
 
     // Spawn pipes; leader sends spawn events, follower consumes them above
     this.timeToNext -= dt;
@@ -264,8 +323,21 @@ export class VersusOnline implements IScene {
   ctx.beginPath(); ctx.arc(ix + 8, iy - 4, 5 * pulse, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
     }
+    // Countdown overlay
+    if (this.starting) {
+      const remain = Math.max(0, this.startAt - performance.now());
+      const sec = Math.ceil(remain / 1000);
+      ctx.fillStyle = '#e8e8f0';
+      ctx.font = '800 54px system-ui';
+      const label = sec > 0 ? String(sec) : 'GO!';
+      const w = ctx.measureText(label).width;
+      ctx.fillText(label, (engine.canvas.width - w)/2, engine.canvas.height * 0.35);
+    }
     this.renderer.drawPlayer(this.p1, '#58a6ff');
     this.renderer.drawPlayer(this.p2, '#ff7b72');
+    // Render particles above players
+    this.particles.render(ctx);
+    this.remoteParticles.render(ctx);
     // draw obstacles
     for (const o of this.obstacles) this.renderer.drawObstacle(o);
     this.hud.render(ctx, this.s1, this.s2);
