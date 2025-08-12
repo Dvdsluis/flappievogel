@@ -12,7 +12,8 @@
   "format": "prettier -w . || true"
   },
   "dependencies": {
-    "vite": "^5.3.4"
+  "vite": "^5.3.4",
+  "@azure/web-pubsub-client": "^1.0.0"
   },
   "devDependencies": {
   "@types/node": "^22.5.0",

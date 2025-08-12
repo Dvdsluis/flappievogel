@@ -45,7 +45,7 @@ export function pickPowerUp(score: number, rng: () => number = Math.random): Pow
     // later tilt slightly towards skill-based effects
     w.rapid *= 1.1; w.multishot *= 1.15; w.bigshot *= 1.1;
   }
-  const entries = Object.entries(w) as Array<[PowerUpKey, number]>
+  const entries = (Object.entries(w) as Array<[PowerUpKey, number]>)
     .filter(([k, val]) => val > 0);
   const total = entries.reduce((s, [, val]) => s + val, 0);
   let r = rng() * total;

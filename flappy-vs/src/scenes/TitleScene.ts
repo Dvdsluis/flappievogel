@@ -1,6 +1,7 @@
 import GameEngine, { IScene } from '../game/engine';
 import GameScene from './GameScene';
 import VersusScene from './VersusScene';
+import VersusOnline from '../modes/VersusOnline';
 import { Audio } from '../game/audio';
 import { Scoreboard } from '../game/scoreboard';
 import { Settings } from '../game/settings';
@@ -10,6 +11,7 @@ export class TitleScene implements IScene {
     // clickable button hit boxes
     private btnS: {x:number,y:number,w:number,h:number} | null = null;
     private btnV: {x:number,y:number,w:number,h:number} | null = null;
+    private btnVO: {x:number,y:number,w:number,h:number} | null = null;
     private btnEditName: {x:number,y:number,w:number,h:number} | null = null;
     onResize?(engine: GameEngine): void {
         engine.ctx.setTransform(1,0,0,1,0,0);
@@ -26,9 +28,19 @@ export class TitleScene implements IScene {
             document.removeEventListener('pointerdown', onDocPointerDown as any);
             document.removeEventListener('click', onDocClick as any);
         };
-        const startNow = (versus: boolean) => {
+        const startNow = (versus: boolean, online = false) => {
             if (started) return; started = true; cleanup();
-            engine.setScene(versus ? new VersusScene() : new GameScene());
+            if (versus && online) {
+                // Prompt for room & name
+                const current = Scoreboard.getPlayerName() || 'Anon';
+                const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
+                Scoreboard.setPlayerName(name);
+                const rid = Math.random().toString(36).slice(2, 6);
+                const room = typeof window !== 'undefined' ? (window.prompt('Room code (share with friend)', rid) || rid) : rid;
+                engine.setScene(new VersusOnline(room, name));
+            } else {
+                engine.setScene(versus ? new VersusScene() : new GameScene());
+            }
         };
         const onPointerDown = (e: PointerEvent) => {
             // Check for button clicks on desktop
@@ -40,6 +52,7 @@ export class TitleScene implements IScene {
                 const y = (e.clientY - rect.top) * sy;
                 if (this.btnS && x>=this.btnS.x && x<=this.btnS.x+this.btnS.w && y>=this.btnS.y && y<=this.btnS.y+this.btnS.h) return startNow(false);
                 if (this.btnV && x>=this.btnV.x && x<=this.btnV.x+this.btnV.w && y>=this.btnV.y && y<=this.btnV.y+this.btnV.h) return startNow(true);
+                if (this.btnVO && x>=this.btnVO.x && x<=this.btnVO.x+this.btnVO.w && y>=this.btnVO.y && y<=this.btnVO.y+this.btnVO.h) return startNow(true, true);
                 if (this.btnEditName && x>=this.btnEditName.x && x<=this.btnEditName.x+this.btnEditName.w && y>=this.btnEditName.y && y<=this.btnEditName.y+this.btnEditName.h) {
                     // Prompt to edit name
                     try {
@@ -76,6 +89,14 @@ export class TitleScene implements IScene {
         // Scene transitions and toggles
         if (engine.input.wasPressed('KeyS')) engine.setScene(new GameScene());
         if (engine.input.wasPressed('KeyV')) engine.setScene(new VersusScene());
+        if (engine.input.wasPressed('KeyO')) {
+            const current = Scoreboard.getPlayerName() || 'Anon';
+            const name = typeof window !== 'undefined' ? (window.prompt('Your name', current) || current) : current;
+            Scoreboard.setPlayerName(name);
+            const rid = Math.random().toString(36).slice(2, 6);
+            const room = typeof window !== 'undefined' ? (window.prompt('Room code (share with friend)', rid) || rid) : rid;
+            engine.setScene(new VersusOnline(room, name));
+        }
     if (engine.input.wasPressed('KeyM')) Audio.muted = !Audio.muted;
     if (engine.input.wasPressed('KeyR')) Settings.toggleReducedMotion();
     if (engine.input.wasPressed('KeyC')) Scoreboard.clear();
@@ -138,8 +159,8 @@ export class TitleScene implements IScene {
         ctx.font = '700 22px system-ui';
         ctx.fillText('Play', cardX + 16, cardY + 16);
         // Buttons
-        const btnW = 180, btnH = 44, gap = 18;
-        const bx = cardX + 16, by = cardY + 56;
+    const btnW = 180, btnH = 44, gap = 18;
+    const bx = cardX + 16, by = cardY + 56;
         const drawBtn = (x:number, y:number, label:string) => {
             ctx.fillStyle = '#15223f';
             ctx.strokeStyle = '#58a6ff88';
@@ -148,10 +169,12 @@ export class TitleScene implements IScene {
             ctx.fillStyle = '#e8e8f0'; ctx.font = '600 18px system-ui';
             ctx.fillText(label, x + 14, y + 28);
         };
-        drawBtn(bx, by, 'S — Singleplayer');
-        drawBtn(bx + btnW + gap, by, 'V — Versus (Local)');
-        this.btnS = { x: bx, y: by, w: btnW, h: btnH };
-        this.btnV = { x: bx + btnW + gap, y: by, w: btnW, h: btnH };
+    drawBtn(bx, by, 'S — Singleplayer');
+    drawBtn(bx + btnW + gap, by, 'V — Versus (Local)');
+    drawBtn(bx + (btnW + gap) * 2, by, 'O — Versus (Online)');
+    this.btnS = { x: bx, y: by, w: btnW, h: btnH };
+    this.btnV = { x: bx + btnW + gap, y: by, w: btnW, h: btnH };
+    this.btnVO = { x: bx + (btnW + gap) * 2, y: by, w: btnW, h: btnH };
 
         // Controls summary
     const cY = cardY + 170;
@@ -168,9 +191,9 @@ export class TitleScene implements IScene {
     let y = cY + 46;
     ctx.fillText('Singleplayer: Flap = Space/ArrowUp/W or Click/Tap • Move = ArrowLeft/Right or A/D • Shoot = Right Click or Ctrl/J (hold)', cX + 16, y);
         y += 28;
-    ctx.fillText('Versus: P1 = Arrows + Space • P2 = W (flap), S (nudge down)', cX + 16, y);
+    ctx.fillText('Versus (Local): P1 = Arrows + Space • P2 = W (flap), S (nudge down)', cX + 16, y);
         y += 28;
-    ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
+    ctx.fillText(`Online: O — enter room code and share it • Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
 
         // Power-ups quick guide
         const pY = cY + 170;
