@@ -23,7 +23,7 @@ export class GameScene implements IScene {
     best = 0;
     gameOver = false;
     paused = false;
-    speed = 140;
+    speed = 120;
     particles = new Particles();
     shakeT = 0;
     hintT = 4;
@@ -52,7 +52,7 @@ export class GameScene implements IScene {
     this.timeToNext = 0;
     this.gameOver = false;
     this.paused = false;
-    this.speed = 140;
+    this.speed = 120;
     // Reset player to visible starting position and defaults
     this.player.x = 80;
     this.player.y = 150;
@@ -64,7 +64,7 @@ export class GameScene implements IScene {
     this.bullets = [];
     this.enemies = [];
     this.powerUps = [];
-    this.enemyTimer = 0;
+    this.enemyTimer = 2.5;
     this.powerTimer = 5;
     this.hintT = 4;
     this.shakeT = 0;
@@ -254,10 +254,11 @@ export class GameScene implements IScene {
         // Spawn obstacles (pipes) periodically
         this.timeToNext -= dt;
         if (this.timeToNext <= 0) {
-            // ramp difficulty
-            this.speed = Math.min(260, this.speed + 2);
-            const dynGap = Math.max(120, 180 - this.score * 2);
-            this.timeToNext = Math.max(1.0, 1.6 - this.score * 0.02);
+            // Progressive difficulty: start slow/wide, ramp up gently
+            const progress = Math.min(1, this.score / 30); // 0..1 over first ~30 points
+            this.speed = Math.min(280, 120 + progress * 140);
+            const dynGap = Math.max(140, 220 - this.score * 2.2); // never below 140
+            this.timeToNext = Math.max(1.1, 1.8 - this.score * 0.02);
             const gap = dynGap;
             const minTop = 40;
             const maxTop = canvasH - gap - 40;
@@ -305,8 +306,8 @@ export class GameScene implements IScene {
         }
 
         // Enemies and power-ups spawn
-        this.enemyTimer -= dt;
-        if (this.enemyTimer <= 0) {
+    this.enemyTimer -= dt;
+    if (this.enemyTimer <= 0) {
             // Try to spawn inside the latest pipe gap
             let gapTop = 40, gapBottom = canvasH - 40;
             if (this.obstacles.length >= 2) {
@@ -326,14 +327,22 @@ export class GameScene implements IScene {
             const minY = Math.max(0, gapTop + margin);
             const maxY = Math.min(canvasH - 20, gapBottom - margin - 18);
             const ex = engine.canvas.width + 40;
-            const ey = (minY < maxY) ? (minY + (maxY - minY) * 0.5) : (40 + Math.random() * (canvasH - 120));
-            const evx = - (120 + Math.random() * 60 + this.score);
-            const e = new Enemy(ex, ey, evx, 0);
+            const ey = (minY < maxY) ? (minY + (maxY - minY) * (0.35 + Math.random()*0.3)) : (40 + Math.random() * (canvasH - 120));
+            // Variant selection by score/time: start with drones, then bees, then tanks, finally kamikaze
+            let variant: import('../entities/Enemy').EnemyVariant = 'drone';
+            if (this.score > 6 && Math.random() < 0.5) variant = 'bee';
+            if (this.score > 15 && Math.random() < 0.35) variant = 'tank';
+            if (this.score > 25 && Math.random() < 0.25) variant = 'kamikaze';
+            const baseSpeed = variant === 'tank' ? 90 : 120;
+            const evx = - (baseSpeed + Math.random() * 60 + this.score * 1.2);
+            const e = new Enemy(ex, ey, evx, 0, variant);
             (e as any).minY = isFinite(minY) ? minY : 20;
             (e as any).maxY = isFinite(maxY) ? maxY : canvasH - 40;
             (e as any).phase = Math.random() * Math.PI * 2;
             this.enemies.push(e);
-            this.enemyTimer = 1.8 - Math.min(1.2, this.score * 0.01);
+            // Spawn cadence: later gets a bit busier but capped
+            const base = 2.4 - Math.min(1.2, this.score * 0.03);
+            this.enemyTimer = Math.max(0.8, base + (variant === 'tank' ? 0.3 : 0));
         }
         this.powerTimer -= dt;
         if (this.powerTimer <= 0) {
@@ -346,10 +355,20 @@ export class GameScene implements IScene {
         // Update bullets/enemies/power-ups
         for (const b of this.bullets) b.update(dt);
         for (const e of this.enemies) {
-            // vertical oscillation constrained to spawn band
+            // Movement pattern per variant
             const phase = ((e as any).phase ?? 0) + performance.now() / 1000;
-            const amp = 35;
-            e.vy = Math.sin(phase) * amp;
+            if ((e as any).variant === 'kamikaze') {
+                // Nudge towards player vertically
+                const targetY = this.player.y - 6;
+                const dy = targetY - e.y;
+                e.vy = Math.max(-120, Math.min(120, dy * 2));
+            } else if ((e as any).variant === 'bee') {
+                e.vy = Math.sin(phase * 1.5) * 55;
+            } else if ((e as any).variant === 'tank') {
+                e.vy = Math.sin(phase * 0.6) * 24;
+            } else {
+                e.vy = Math.sin(phase) * 35; // drone
+            }
             e.update(dt);
             const minY = (e as any).minY ?? 20;
             const maxY = (e as any).maxY ?? (canvasH - 40);
@@ -378,8 +397,10 @@ export class GameScene implements IScene {
                         this.particles.burst(cx, cy, Settings.reducedMotion ? 10 : 22, '#ffb347aa');
                         this.particles.burst(cx, cy, Settings.reducedMotion ? 8 : 14, '#ff7b72aa');
                         e.x = -9999; // flagged; filtered later
-                        this.score += GameScene.KILL_POINTS;
-                        this.floats.push({ x: cx, y: cy, text: `+${GameScene.KILL_POINTS}`, ttl: 0.9, vy: -32 });
+                        // tougher enemies give a bit more
+                        const bonus = ((e as any).variant === 'tank') ? GameScene.KILL_POINTS + 1 : GameScene.KILL_POINTS;
+                        this.score += bonus;
+                        this.floats.push({ x: cx, y: cy, text: `+${bonus}`, ttl: 0.9, vy: -32 });
                         this.shakeT = Settings.reducedMotion ? 0.0 : Math.max(this.shakeT, 0.12);
                         Audio.score();
                     }

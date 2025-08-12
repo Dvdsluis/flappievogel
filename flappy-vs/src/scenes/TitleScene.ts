@@ -7,6 +7,9 @@ import { Settings } from '../game/settings';
 
 export class TitleScene implements IScene {
     private t = 0;
+    // clickable button hit boxes
+    private btnS: {x:number,y:number,w:number,h:number} | null = null;
+    private btnV: {x:number,y:number,w:number,h:number} | null = null;
     onResize?(engine: GameEngine): void {
         engine.ctx.setTransform(1,0,0,1,0,0);
     }
@@ -26,13 +29,25 @@ export class TitleScene implements IScene {
             if (started) return; started = true; cleanup();
             engine.setScene(versus ? new VersusScene() : new GameScene());
         };
-        const onPointerDown = (e: PointerEvent) => startNow(false);
+        const onPointerDown = (e: PointerEvent) => {
+            // Check for button clicks on desktop
+            if (this.btnS || this.btnV) {
+                const rect = engine.canvas.getBoundingClientRect();
+                const sx = engine.canvas.width / rect.width;
+                const sy = engine.canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * sx;
+                const y = (e.clientY - rect.top) * sy;
+                if (this.btnS && x>=this.btnS.x && x<=this.btnS.x+this.btnS.w && y>=this.btnS.y && y<=this.btnS.y+this.btnS.h) return startNow(false);
+                if (this.btnV && x>=this.btnV.x && x<=this.btnV.x+this.btnV.w && y>=this.btnV.y && y<=this.btnV.y+this.btnV.h) return startNow(true);
+            }
+            startNow(false);
+        };
         const onTouchStart = (e: TouchEvent) => {
             const touches = e.touches?.length ?? 0;
             startNow(touches >= 2);
         };
         const onClick = (e: MouseEvent) => startNow(false);
-        const onDocPointerDown = (e: PointerEvent) => startNow(false);
+    const onDocPointerDown = (e: PointerEvent) => startNow(false);
         const onDocTouchStart = (e: TouchEvent) => {
             const touches = e.touches?.length ?? 0;
             startNow(touches >= 2);
@@ -55,7 +70,7 @@ export class TitleScene implements IScene {
     if (engine.input.wasPressed('KeyR')) Settings.toggleReducedMotion();
     if (engine.input.wasPressed('KeyC')) Scoreboard.clear();
 
-        // Background gradient
+    // Background gradient
         const { ctx } = engine;
         const w = engine.canvas.width;
         const h = engine.canvas.height;
@@ -76,51 +91,76 @@ export class TitleScene implements IScene {
         }
         ctx.restore();
 
-        // Floating title
-        const bob = Math.sin(this.t * 2) * 6;
-        ctx.fillStyle = '#e8e8f0';
-        ctx.font = '800 64px system-ui, ui-sans-serif, -apple-system, Segoe UI';
-        ctx.textBaseline = 'top';
-    ctx.fillText('Crappy Bird Extreme', 40, 80 + bob);
+    // Floating centered title
+    const bob = Math.sin(this.t * 2) * 6;
+    ctx.fillStyle = '#e8e8f0';
+    ctx.textBaseline = 'top';
+    const title = 'Crappy Bird Extreme';
+    ctx.font = '800 64px system-ui, ui-sans-serif, -apple-system, Segoe UI';
+    const tw = ctx.measureText(title).width;
+    const tx = Math.max(24, (w - tw) / 2);
+    const ty = 60 + bob;
+    ctx.fillText(title, tx, ty);
 
-        // Accent underline
-        ctx.strokeStyle = '#58a6ff';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-    ctx.moveTo(40, 80 + bob + 64 + 8);
-    ctx.lineTo(520, 80 + bob + 64 + 8);
-        ctx.stroke();
+    // Accent underline
+    ctx.strokeStyle = '#58a6ff';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty + 64 + 8);
+    ctx.lineTo(tx + Math.min(520, tw * 0.6), ty + 64 + 8);
+    ctx.stroke();
 
     // Subtitle
     ctx.font = '700 20px system-ui';
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText('yoloswag edition', 44, 80 + bob + 64 + 18 + 10);
+    ctx.fillText('yoloswag edition', tx + 4, ty + 64 + 28);
 
         // Cards with options
-        ctx.fillStyle = '#0f172a88';
-        const cardY = 180;
-        ctx.fillRect(32, cardY, Math.min(520, w - 64), 150);
+        // Play buttons card (centered)
+        const cardW = Math.min(560, w - 64);
+        const cardY = 170;
+        const cardX = (w - cardW) / 2;
+        ctx.fillStyle = '#0f172acc';
+        ctx.beginPath();
+        ctx.roundRect(cardX, cardY, cardW, 150, 14);
+        ctx.fill();
         ctx.fillStyle = '#cdd9e5';
         ctx.font = '700 22px system-ui';
-        ctx.fillText('Play', 48, cardY + 16);
-        ctx.font = '500 18px system-ui';
-        ctx.fillText('S — Singleplayer', 48, cardY + 52);
-        ctx.fillText('V — Versus (Local)', 48, cardY + 80);
+        ctx.fillText('Play', cardX + 16, cardY + 16);
+        // Buttons
+        const btnW = 180, btnH = 44, gap = 18;
+        const bx = cardX + 16, by = cardY + 56;
+        const drawBtn = (x:number, y:number, label:string) => {
+            ctx.fillStyle = '#15223f';
+            ctx.strokeStyle = '#58a6ff88';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.roundRect(x, y, btnW, btnH, 10); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#e8e8f0'; ctx.font = '600 18px system-ui';
+            ctx.fillText(label, x + 14, y + 28);
+        };
+        drawBtn(bx, by, 'S — Singleplayer');
+        drawBtn(bx + btnW + gap, by, 'V — Versus (Local)');
+        this.btnS = { x: bx, y: by, w: btnW, h: btnH };
+        this.btnV = { x: bx + btnW + gap, y: by, w: btnW, h: btnH };
 
         // Controls summary
-        const cY = cardY + 170;
-        ctx.fillStyle = '#0f172a88';
-        ctx.fillRect(32, cY, Math.min(620, w - 64), 160);
+    const cY = cardY + 170;
+    const cW = Math.min(760, w - 64);
+    const cX = (w - cW) / 2;
+    ctx.fillStyle = '#0f172acc';
+    ctx.beginPath();
+    ctx.roundRect(cX, cY, cW, 160, 14);
+    ctx.fill();
         ctx.fillStyle = '#cdd9e5';
         ctx.font = '700 20px system-ui';
-        ctx.fillText('Controls', 48, cY + 16);
+    ctx.fillText('Controls', cX + 16, cY + 16);
         ctx.font = '500 16px system-ui';
-        let y = cY + 46;
-    ctx.fillText('Singleplayer: Flap = Space/ArrowUp/W or Click/Tap • Move = ArrowLeft/Right or A/D • Shoot = Right Click or Ctrl/J (hold)', 48, y);
+    let y = cY + 46;
+    ctx.fillText('Singleplayer: Flap = Space/ArrowUp/W or Click/Tap • Move = ArrowLeft/Right or A/D • Shoot = Right Click or Ctrl/J (hold)', cX + 16, y);
         y += 28;
-        ctx.fillText('Versus: P1 = Arrows + Space • P2 = W (flap), S (nudge down)', 48, y);
+    ctx.fillText('Versus: P1 = Arrows + Space • P2 = W (flap), S (nudge down)', cX + 16, y);
         y += 28;
-    ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, 48, y);
+    ctx.fillText(`Mute = M (${Audio.muted ? 'Muted' : 'Sound on'}) • Reduced motion = R (${Settings.reducedMotion ? 'On' : 'Off'}) • Esc returns here`, cX + 16, y);
 
         // Top scores
         const top = Scoreboard.getTop(5);
@@ -145,12 +185,14 @@ export class TitleScene implements IScene {
         }
 
         // Pulse prompt
-        const pulse = 0.5 + 0.5 * Math.sin(this.t * 3);
+    const pulse = 0.5 + 0.5 * Math.sin(this.t * 3);
         ctx.save();
         ctx.globalAlpha = 0.6 + 0.4 * pulse;
         ctx.fillStyle = '#58a6ff';
         ctx.font = '700 18px system-ui';
-    ctx.fillText('Tap to start Singleplayer • Two-finger tap for Versus (or press S/V)', 40, h - 60);
+    const prompt = 'Tap to start • Starts easy: wider gaps, slower pipes; difficulty ramps up. Two-finger tap for Versus (S/V)';
+    const pw = ctx.measureText(prompt).width;
+    ctx.fillText(prompt, Math.max(20, (w - pw) / 2), h - 60);
         ctx.restore();
     }
     render(): void {}

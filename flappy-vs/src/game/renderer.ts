@@ -121,12 +121,27 @@ export class Renderer {
 
     drawEnemy(e: Enemy) {
         const { ctx } = this;
-        ctx.fillStyle = '#ff7b72';
-        ctx.beginPath();
-        ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillStyle = '#00000055';
-        ctx.fillRect(e.x + 2, e.y + 2, e.width - 4, 3); // simple band
+        const variant = (e as any).variant || 'drone';
+        if (variant === 'tank') {
+            ctx.fillStyle = '#c65353';
+            ctx.beginPath(); ctx.roundRect(e.x, e.y, e.width, e.height, 4); ctx.fill();
+            ctx.fillStyle = '#00000055'; ctx.fillRect(e.x + 3, e.y + e.height - 6, e.width - 6, 4);
+        } else if (variant === 'bee') {
+            ctx.fillStyle = '#ffd166';
+            ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#00000066';
+            ctx.fillRect(e.x + 4, e.y + 4, e.width - 8, 4);
+            ctx.fillRect(e.x + 4, e.y + 10, e.width - 8, 4);
+        } else if (variant === 'kamikaze') {
+            ctx.fillStyle = '#ff7b72';
+            ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#ffffffaa';
+            ctx.beginPath(); ctx.arc(e.x + e.width/2 + 3, e.y + e.height/2 - 2, 3, 0, Math.PI*2); ctx.fill();
+        } else { // drone
+            ctx.fillStyle = '#ff7b72';
+            ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#00000055'; ctx.fillRect(e.x + 2, e.y + 2, e.width - 4, 3);
+        }
     }
 
     drawPowerUp(p: PowerUp) {
