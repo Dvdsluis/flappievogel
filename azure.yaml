@@ -1,0 +1,8 @@
+name: flappy-vs
+infra:
+  provider: bicep
+services:
+  web:
+    project: flappy-vs
+    host: staticwebapp
+    language: ts
