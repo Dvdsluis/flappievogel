@@ -148,6 +148,34 @@ export class TitleScene implements IScene {
     ctx.lineTo(tx + Math.min(520, tw * 0.65), ty + 72 + 6);
     ctx.stroke();
 
+    // Little animated bird next to the title
+    const birdX = tx - 80, birdY = ty + 10; // position left of the title
+    const r = 18;
+    const wingPhase = Math.sin(this.t * 10) * 0.6;
+    // body
+    ctx.fillStyle = '#58a6ff';
+    ctx.beginPath(); ctx.arc(birdX, birdY, r, 0, Math.PI * 2); ctx.fill();
+    // belly
+    ctx.fillStyle = '#ffffffaa';
+    ctx.beginPath(); ctx.arc(birdX - r * 0.2, birdY + r * 0.1, r * 0.7, Math.PI * 0.1, Math.PI * 1.2); ctx.fill();
+    // wing
+    ctx.save();
+    ctx.translate(birdX - r * 0.2, birdY);
+    ctx.rotate(-0.8 + wingPhase);
+    ctx.fillStyle = '#00000022';
+    ctx.beginPath(); ctx.ellipse(0, 0, r * 0.9, r * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // beak
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(birdX + r * 0.9, birdY);
+    ctx.lineTo(birdX + r * 1.4, birdY - r * 0.2);
+    ctx.lineTo(birdX + r * 0.9, birdY + r * 0.2);
+    ctx.closePath(); ctx.fill();
+    // eye
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(birdX + r * 0.2, birdY - r * 0.3, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(birdX + r * 0.25, birdY - r * 0.3, r * 0.1, 0, Math.PI * 2); ctx.fill();
+
         // Vignette for depth
         ctx.save();
         const vg = ctx.createRadialGradient(w/2, h/2, Math.min(w,h)*0.2, w/2, h/2, Math.max(w,h)*0.6);
@@ -172,17 +200,18 @@ export class TitleScene implements IScene {
         // Buttons
     const btnW = 180, btnH = 44, gap = 18;
     const bx = cardX + 16, by = cardY + 56;
-        const drawBtn = (x:number, y:number, label:string) => {
+        const drawBtn = (x:number, y:number, label:string, icon?:string) => {
             ctx.fillStyle = '#15223f';
             ctx.strokeStyle = '#58a6ffaa';
             ctx.lineWidth = 3;
             ctx.beginPath(); ctx.roundRect(x, y, btnW, btnH, 10); ctx.fill(); ctx.stroke();
+            if (icon) { ctx.fillStyle = '#9cc9ff'; ctx.font = '700 18px system-ui'; ctx.fillText(icon, x + 12, y + 28); }
             ctx.fillStyle = '#e8e8f0'; ctx.font = '600 18px system-ui';
-            ctx.fillText(label, x + 14, y + 28);
+            ctx.fillText(label, x + (icon ? 36 : 14), y + 28);
         };
-    drawBtn(bx, by, 'S — Singleplayer');
-    drawBtn(bx + btnW + gap, by, 'V — Versus (Local)');
-    drawBtn(bx + (btnW + gap) * 2, by, 'O — Versus (Online)');
+        drawBtn(bx, by, 'S — Singleplayer', '🎮');
+        drawBtn(bx + btnW + gap, by, 'V — Versus (Local)', '🤝');
+        drawBtn(bx + (btnW + gap) * 2, by, 'O — Versus (Online)', '🌐');
     this.btnS = { x: bx, y: by, w: btnW, h: btnH };
     this.btnV = { x: bx + btnW + gap, y: by, w: btnW, h: btnH };
     this.btnVO = { x: bx + (btnW + gap) * 2, y: by, w: btnW, h: btnH };
