@@ -28,6 +28,8 @@ export class VersusOnline implements IScene {
   private reconnecting = false;
   private retries = 0;
   private unloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
+  private waiting = true;
+  private bothReady = false;
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -41,11 +43,11 @@ export class VersusOnline implements IScene {
       this.toast = { text: 'Online: failed to connect', t: 3 };
       return;
     }
-    const myId = this.rt.id;
-    // Show connected toast and status
-    this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
-    // Presence join
-    this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
+  const myId = this.rt.id;
+  // Show connected toast and status
+  this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
+  // Presence join and waiting room
+  this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
     // Receive
     this.rt.onMessage((m: RTMessage) => {
       if (m.type === 'state' && m.id !== myId) {
@@ -67,8 +69,19 @@ export class VersusOnline implements IScene {
         // Elect leader deterministically: lowest id
         this.isLeader = (myId < m.id);
         this.toast = { text: `${m.name || 'Opponent'} joined`, t: 2.5 };
+        this.bothReady = true;
+        if (this.isLeader && this.waiting) {
+          // leader sends start
+          setTimeout(() => {
+            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now() });
+            this.waiting = false;
+          }, 800);
+        }
+      } else if (m.type === 'start') {
+        this.waiting = false;
       } else if (m.type === 'leave' && m.id !== myId) {
         this.toast = { text: 'Opponent left', t: 3 };
+        this.waiting = true; this.bothReady = false; this.remoteId = null;
       }
     });
     this.rt.onDisconnected(() => {
@@ -125,6 +138,10 @@ export class VersusOnline implements IScene {
 
   update(dt: number, engine: GameEngine) {
     if (this.paused) return;
+    if (this.waiting) {
+      // Show simple waiting room background and hint via render()
+      return;
+    }
     // local input
     if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) { Physics.jump(this.p1); Audio.flap(); }
     const dir = engine.input.getMovementDirection(); this.p1.vx = dir.x * 80;
@@ -184,6 +201,19 @@ export class VersusOnline implements IScene {
 
   render(ctx: CanvasRenderingContext2D, engine: GameEngine) {
     this.renderer.clear(1/60);
+    if (this.waiting) {
+      // Waiting room screen
+      ctx.fillStyle = '#e8e8f0';
+      ctx.font = '700 24px system-ui';
+      const msg = this.bothReady ? 'Found opponent! Starting…' : `Waiting in room ${this.roomId}…`;
+      const w = ctx.measureText(msg).width;
+      ctx.fillText(msg, Math.max(20, (engine.canvas.width - w)/2), 120);
+      ctx.font = '600 14px system-ui';
+      ctx.fillStyle = '#94a3b8';
+      const sub = 'Share the code with your friend. Game starts when they join.';
+      const sw = ctx.measureText(sub).width;
+      ctx.fillText(sub, Math.max(20, (engine.canvas.width - sw)/2), 150);
+    }
     this.renderer.drawPlayer(this.p1, '#58a6ff');
     this.renderer.drawPlayer(this.p2, '#ff7b72');
     // draw obstacles
