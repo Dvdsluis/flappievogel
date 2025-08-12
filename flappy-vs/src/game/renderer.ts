@@ -7,12 +7,7 @@ import { PowerUp } from '../entities/PowerUp';
 export class Renderer {
     private t = 0;
     private cloudOffset = 0;
-    private palette = { top: '#0f1630', bottom: '#0b1022' };
     constructor(public canvas: HTMLCanvasElement, public ctx: CanvasRenderingContext2D) {}
-
-    setPalette(top: string, bottom: string) {
-        this.palette.top = top; this.palette.bottom = bottom;
-    }
 
     clear(dt: number = 0) {
         const { ctx } = this;
@@ -21,9 +16,9 @@ export class Renderer {
         this.cloudOffset = (this.cloudOffset + dt * 20) % (w + 200);
 
         // Sky gradient
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, this.palette.top);
-    g.addColorStop(1, this.palette.bottom);
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#0f1630');
+        g.addColorStop(1, '#0b1022');
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, w, h);
 
