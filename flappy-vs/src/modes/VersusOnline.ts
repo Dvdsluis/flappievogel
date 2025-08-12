@@ -23,6 +23,11 @@ export class VersusOnline implements IScene {
   private sendAccum = 0; // throttle to ~25Hz
   private toast: { text: string; t: number } | null = null;
   private isLeader = false; // simple leader: first to spawn obstacles
+  private remoteId: string | null = null;
+  private remoteName: string | undefined;
+  private reconnecting = false;
+  private retries = 0;
+  private unloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -37,8 +42,8 @@ export class VersusOnline implements IScene {
       return;
     }
     const myId = this.rt.id;
-    // Leader: first client decides spawn timing (tie-break by id later)
-    this.isLeader = myId < 'm'; // cheap pseudo-random leader across two peers
+    // Show connected toast and status
+    this.toast = { text: `Connected • Room ${this.roomId}`, t: 2.5 };
     // Presence join
     this.rt.send({ type: 'join', id: myId, roomId: this.roomId, name: this.name });
     // Receive
@@ -46,6 +51,7 @@ export class VersusOnline implements IScene {
       if (m.type === 'state' && m.id !== myId) {
         this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
         if (this.remoteHistory.length > 30) this.remoteHistory.shift();
+        this.remoteName = m.name || this.remoteName;
       } else if (m.type === 'spawn' && this.isLeader === false) {
         // follower applies leader spawns
         const h = engine.canvas.height;
@@ -56,11 +62,65 @@ export class VersusOnline implements IScene {
         this.speed = m.speed;
         this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
         this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
+      } else if (m.type === 'join' && m.id !== myId) {
+        this.remoteId = m.id; this.remoteName = m.name;
+        // Elect leader deterministically: lowest id
+        this.isLeader = (myId < m.id);
+        this.toast = { text: `${m.name || 'Opponent'} joined`, t: 2.5 };
+      } else if (m.type === 'leave' && m.id !== myId) {
+        this.toast = { text: 'Opponent left', t: 3 };
       }
     });
     this.rt.onDisconnected(() => {
       this.toast = { text: 'Online: disconnected', t: 3 };
+      if (!this.reconnecting && this.retries < 2) {
+        this.reconnecting = true; this.retries++;
+        setTimeout(() => this.reconnect(negotiateUrl), 1500);
+      }
     });
+    // Leave on unload
+    this.unloadHandler = (e: BeforeUnloadEvent) => {
+      try { this.rt?.send({ type: 'leave', id: myId, roomId: this.roomId }); } catch {}
+    };
+    window.addEventListener('beforeunload', this.unloadHandler);
+  }
+
+  private async reconnect(negotiateUrl: string) {
+    const prev = this.rt; const myName = this.name;
+    this.rt = new Realtime(negotiateUrl);
+    try {
+      await this.rt.connect(this.roomId);
+      const myId = this.rt.id;
+      this.toast = { text: 'Online: reconnected', t: 2.5 };
+      // rewire handlers
+      this.rt.onMessage((m: RTMessage) => {
+        if (m.type === 'state' && m.id !== myId) {
+          this.remoteHistory.push({ t: m.t, x: m.x, y: m.y, vy: m.vy, score: m.score, hp: m.hp, name: m.name });
+          if (this.remoteHistory.length > 30) this.remoteHistory.shift();
+          this.remoteName = m.name || this.remoteName;
+        } else if (m.type === 'spawn' && this.isLeader === false) {
+          const h = (this as any).renderer.canvas.height;
+          const w = 80; const x = (this as any).renderer.canvas.width + w;
+          const topH = m.topH; const gap = m.gap; this.speed = m.speed;
+          this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
+          this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
+        } else if (m.type === 'join' && m.id !== myId) {
+          this.remoteId = m.id; this.remoteName = m.name; this.isLeader = (myId < m.id);
+        } else if (m.type === 'leave' && m.id !== myId) {
+          this.toast = { text: 'Opponent left', t: 3 };
+        }
+      });
+      this.rt.onDisconnected(() => {
+        this.toast = { text: 'Online: disconnected', t: 3 };
+      });
+      this.rt.send({ type: 'join', id: this.rt.id, roomId: this.roomId, name: myName });
+    } catch (e) {
+      this.toast = { text: 'Online: reconnection failed', t: 3 };
+    } finally {
+      this.reconnecting = false;
+      // best-effort cleanup old client
+      try { void prev; } catch {}
+    }
   }
 
   update(dt: number, engine: GameEngine) {
@@ -129,6 +189,14 @@ export class VersusOnline implements IScene {
     // draw obstacles
     for (const o of this.obstacles) this.renderer.drawObstacle(o);
     this.hud.render(ctx, this.s1, this.s2);
+  // Names above players
+  ctx.fillStyle = '#cdd9e5'; ctx.font = '700 12px system-ui';
+  if (this.name) ctx.fillText(this.name, this.p1.x, Math.max(12, this.p1.y - 6));
+  if (this.remoteName) ctx.fillText(this.remoteName, this.p2.x, Math.max(12, this.p2.y - 6));
+  // Connection overlay
+  ctx.fillStyle = '#94a3b8'; ctx.font = '600 12px system-ui';
+  const role = this.isLeader ? 'Leader' : 'Follower';
+  ctx.fillText(`Online • Room ${this.roomId} • ${role}`, 16, engine.canvas.height - 8);
     // Toasts
     if (this.toast) {
       this.toast.t -= 1/60;
