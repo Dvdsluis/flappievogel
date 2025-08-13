@@ -12,6 +12,7 @@ import { POWERUPS, pickPowerUp } from '../game/powerups';
 import { mapPointerButtonToAction } from '../game/controls';
 import { Settings } from '../game/settings';
 import { Realtime, RTMessage } from '../net/realtime';
+import TitleScene from '../scenes/TitleScene';
 
 export class VersusOnline implements IScene {
   p1 = new Player(80, 140, 26, 26);
@@ -357,7 +358,7 @@ export class VersusOnline implements IScene {
     if (engine.input.wasPressed('Escape') || engine.input.wasPressed('KeyP')) this.paused = !this.paused;
     if (this.paused) {
       if (engine.input.wasPressed('KeyR')) { /* soft reset: just clear scores and obstacles */ this.s1 = this.s2 = 0; this.obstacles = []; this.powerups = []; this.bullets = []; this.enemyBullets = []; this.paused = false; }
-      // Return to title on Enter/T handled in render overlay prompt
+      if (engine.input.wasPressed('Enter') || engine.input.wasPressed('KeyT')) { try { this.dispose(); } catch {} engine.setScene(new TitleScene()); return; }
       return;
     }
     // Update floaters
