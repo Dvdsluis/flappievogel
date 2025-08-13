@@ -115,33 +115,87 @@ export class Renderer {
 
     drawProjectile(b: Projectile, color: string = '#ffd166') {
         const { ctx } = this;
-        ctx.fillStyle = b.color || color;
-        ctx.fillRect(b.x, b.y, b.width, b.height);
+    // Glow + rounded projectile
+    const c = b.color || color;
+    ctx.save();
+    ctx.shadowColor = c + 'aa';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.width, b.height, Math.min(6, b.height/2));
+    ctx.fill();
+    // Motion hint (streak)
+    ctx.globalAlpha = 0.35;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = c;
+    ctx.fillRect(b.x - Math.min(16, b.width * 2), b.y + b.height * 0.25, Math.min(16, b.width * 2), b.height * 0.5);
+    ctx.restore();
     }
 
     drawEnemy(e: Enemy) {
         const { ctx } = this;
         const variant = (e as any).variant || 'drone';
+        ctx.save();
         if (variant === 'tank') {
-            ctx.fillStyle = '#c65353';
+            // Body with metallic gradient and outline
+            const grad = ctx.createLinearGradient(e.x, e.y, e.x, e.y + e.height);
+            grad.addColorStop(0, '#d86a6a');
+            grad.addColorStop(1, '#a83e3e');
+            ctx.fillStyle = grad;
             ctx.beginPath(); ctx.roundRect(e.x, e.y, e.width, e.height, 4); ctx.fill();
-            ctx.fillStyle = '#00000055'; ctx.fillRect(e.x + 3, e.y + e.height - 6, e.width - 6, 4);
+            ctx.lineWidth = 2; ctx.strokeStyle = '#00000055'; ctx.stroke();
+            // Treads
+            ctx.fillStyle = '#0f172a88'; ctx.fillRect(e.x + 3, e.y + e.height - 6, e.width - 6, 5);
+            // Turret
+            ctx.fillStyle = '#7f1d1d'; ctx.fillRect(e.x + e.width - 8, e.y + e.height/2 - 2, 10, 4);
         } else if (variant === 'bee') {
+            // Body
             ctx.fillStyle = '#ffd166';
             ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            // Stripes
             ctx.fillStyle = '#00000066';
-            ctx.fillRect(e.x + 4, e.y + 4, e.width - 8, 4);
-            ctx.fillRect(e.x + 4, e.y + 10, e.width - 8, 4);
+            ctx.fillRect(e.x + 4, e.y + 4, e.width - 8, 3);
+            ctx.fillRect(e.x + 4, e.y + 9, e.width - 8, 3);
+            // Wings (buzz)
+            const buzz = Math.sin(this.t * 30) * 0.4;
+            ctx.fillStyle = '#ffffff88';
+            ctx.save();
+            ctx.translate(e.x + e.width/2 - 4, e.y + 2);
+            ctx.rotate(-0.6 + buzz);
+            ctx.beginPath(); ctx.ellipse(0, 0, 6, 3, 0, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+            ctx.save();
+            ctx.translate(e.x + e.width/2 + 4, e.y + 2);
+            ctx.rotate(0.6 - buzz);
+            ctx.beginPath(); ctx.ellipse(0, 0, 6, 3, 0, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+            // Eye
+            ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.arc(e.x + e.width - 6, e.y + 6, 2, 0, Math.PI*2); ctx.fill();
         } else if (variant === 'kamikaze') {
+            // Pulsing glow orb
+            const pulse = 0.6 + 0.4 * Math.sin(this.t * 6);
+            ctx.shadowColor = '#ff3b30aa'; ctx.shadowBlur = 18 * pulse;
             ctx.fillStyle = '#ff7b72';
             ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0;
             ctx.fillStyle = '#ffffffaa';
             ctx.beginPath(); ctx.arc(e.x + e.width/2 + 3, e.y + e.height/2 - 2, 3, 0, Math.PI*2); ctx.fill();
         } else { // drone
-            ctx.fillStyle = '#ff7b72';
+            // Body with subtle highlight
+            const grad = ctx.createLinearGradient(e.x, e.y, e.x, e.y + e.height);
+            grad.addColorStop(0, '#ff8a82');
+            grad.addColorStop(1, '#ff6a60');
+            ctx.fillStyle = grad;
             ctx.beginPath(); ctx.ellipse(e.x + e.width/2, e.y + e.height/2, e.width/2, e.height/2, 0, 0, Math.PI*2); ctx.fill();
+            // Eyelight bar
             ctx.fillStyle = '#00000055'; ctx.fillRect(e.x + 2, e.y + 2, e.width - 4, 3);
+            // Blinking status LED
+            const blink = (Math.floor(this.t * 4) % 2) === 0 ? 1 : 0;
+            ctx.globalAlpha = 0.6 + 0.4 * blink; ctx.fillStyle = '#38bdf8';
+            ctx.beginPath(); ctx.arc(e.x + e.width - 6, e.y + e.height - 6, 2, 0, Math.PI*2); ctx.fill();
+            ctx.globalAlpha = 1;
         }
+        ctx.restore();
     }
 
     drawPowerUp(p: PowerUp) {
@@ -150,19 +204,56 @@ export class Renderer {
             heal: '#7ee787', rapid: '#f7b84a', shield: '#8b8efb',
             multishot: '#38bdf8', bigshot: '#fb7185', slowmo: '#a78bfa', magnet: '#f472b6'
         };
-        ctx.fillStyle = colors[p.type] || '#f7b84a';
-        ctx.beginPath();
-        ctx.roundRect(p.x, p.y, p.width, p.height, 4);
-        ctx.fill();
-        // simple glyphs per type
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '700 10px system-ui';
-        const cx = p.x + p.width/2, cy = p.y + p.height/2 + 3;
-        const glyphs: Record<string,string> = {
-            heal: '+', rapid: 'R', shield: 'S', multishot: 'M', bigshot: 'B', slowmo: '⌛', magnet: 'U'
-        };
-        const g = glyphs[p.type] || '?';
-        const tw = ctx.measureText(g).width;
-        ctx.fillText(g, cx - tw/2, cy);
+        const base = colors[p.type] || '#f7b84a';
+        // Bobbing and pulsing
+        const bob = Math.sin(this.t * 3 + (p.x + p.y) * 0.01) * 2;
+        const pulse = 0.75 + 0.25 * Math.sin(this.t * 4 + (p.x) * 0.03);
+        const x = p.x, y = p.y + bob, w = p.width, h = p.height;
+        // Outer glow
+        ctx.save();
+        ctx.shadowColor = base + 'aa';
+        ctx.shadowBlur = 14 * pulse;
+        // Gradient fill
+        const grad = ctx.createLinearGradient(x, y, x, y + h);
+        grad.addColorStop(0, base);
+        grad.addColorStop(1, '#ffffff55');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.fill();
+        // Outline
+        ctx.lineWidth = 2; ctx.strokeStyle = '#0f172a66'; ctx.stroke();
+        // Glyphs per type
+        ctx.shadowBlur = 0; ctx.fillStyle = '#0f172a';
+        const cx = x + w/2, cy = y + h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1.0 + (pulse-1)*0.5, 1.0 + (pulse-1)*0.5);
+        // Draw simple icons
+        if ((p as any).type === 'heal') {
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(-2, -6, 4, 12);
+            ctx.fillRect(-6, -2, 12, 4);
+        } else if ((p as any).type === 'shield') {
+            ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.moveTo(0, -6); ctx.quadraticCurveTo(8, -4, 8, 2); ctx.quadraticCurveTo(0, 8, 0, 10);
+            ctx.quadraticCurveTo(0, 8, -8, 2); ctx.quadraticCurveTo(-8, -4, 0, -6); ctx.stroke();
+        } else if ((p as any).type === 'multishot') {
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(-6, -2, 4, 4); ctx.fillRect(-1, -2, 4, 4); ctx.fillRect(4, -2, 4, 4);
+        } else if ((p as any).type === 'rapid') {
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath(); ctx.moveTo(-5, -6); ctx.lineTo(1, 0); ctx.lineTo(-3, 0); ctx.lineTo(5, 6); ctx.closePath(); ctx.fill();
+        } else if ((p as any).type === 'bigshot') {
+            ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.roundRect(-4, -3, 8, 6, 3); ctx.fill();
+        } else if ((p as any).type === 'slowmo') {
+            ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillRect(-1, -4, 2, 4); ctx.fillRect(-1, 0, 2, 4);
+        } else if ((p as any).type === 'magnet') {
+            ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 6, Math.PI*0.2, Math.PI*0.8); ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, 6, -Math.PI*0.8, -Math.PI*0.2); ctx.stroke();
+        } else {
+            ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+        ctx.restore();
     }
 }

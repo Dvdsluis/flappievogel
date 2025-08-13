@@ -56,6 +56,7 @@ export class VersusOnline implements IScene {
   private unloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
   private waiting = true;
   private bothReady = false;
+  private gameStarted = false;
   private presenceAccum = 0;
   private myId: string | null = null;
   private lastMsgAt = 0; // timestamp of last received message for heartbeat
@@ -66,6 +67,13 @@ export class VersusOnline implements IScene {
   private trailAccum = 0;
   private particles = new Particles();
   private remoteParticles = new Particles();
+  // UI floaters (e.g., +1)
+  private floaters: Array<{ text: string; x: number; y: number; vy: number; t: number; life: number; color?: string }> = [];
+  // Camera shake
+  private shakeT = 0; private shakeTotal = 0; private shakeAmp = 0;
+  // Pre-start queues (avoid spawning during countdown on follower)
+  private queuedSpawns: Array<{ x:number; topH:number; gap:number; speed:number; w:number }>=[];
+  private queuedPowerSpawns: Array<{ pid:string; kind:PowerType; x:number; y:number; vx:number }>=[];
 
   constructor(roomId: string, name: string) { this.roomId = roomId; this.name = name; }
 
@@ -90,38 +98,53 @@ export class VersusOnline implements IScene {
       } else if (m.type === 'spawn' && this.isLeader === false) {
         // follower applies leader spawns
         const h = engine.canvas.height;
-        const w = 80;
+        const w = m.w ?? 80;
         const x = engine.canvas.width + w;
         const topH = m.topH;
         const gap = m.gap;
         this.speed = m.speed;
-        this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
-        this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
+        // If we haven't started, queue to apply on start to avoid pre-game obstacles
+        if (this.waiting || this.starting || !this.gameStarted) {
+          this.queuedSpawns.push({ x, topH, gap, speed: this.speed, w });
+        } else {
+          this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
+          this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
+        }
       } else if (m.type === 'join' && m.id !== myId) {
         this.remoteId = m.id; this.remoteName = m.name;
         // Elect leader deterministically: lowest id
         this.isLeader = (myId < m.id);
         this.toast = { text: `${m.name || 'Opponent'} joined`, t: 2.5 };
         this.bothReady = true;
-        if (this.isLeader && this.waiting) {
+    if (this.isLeader && this.waiting) {
           // Leader schedules a synchronized start ~2s in the future
           setTimeout(() => {
-            const delayMs = 2000;
-            const startAt = performance.now() + delayMs;
-            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now(), startAt, delayMs });
-            this.startAt = startAt;
+            const delayMs = 2200; // add small buffer
+            // Compute an absolute wall-clock start time; followers adjust from their local clock
+            const startAtEpoch = Date.now() + delayMs;
+            this.rt?.send({ type: 'start', id: myId, roomId: this.roomId, t: performance.now(), startAt: startAtEpoch, delayMs });
+            // Leader also uses epoch to align with follower and avoid starting too early
+            const localDelay = Math.max(400, startAtEpoch - Date.now());
+            this.startAt = performance.now() + localDelay;
             this.waiting = false;
             this.starting = true;
+            this.gameStarted = false;
             this.lastCountdownSecond = 4; // force first tick
           }, 600);
         }
       } else if (m.type === 'start') {
-  // follower applies leader-provided startAt or delayMs
-  const sa = (m as any).startAt as number | undefined;
-  const delayMs = (m as any).delayMs as number | undefined;
-  if (typeof sa === 'number') this.startAt = sa; else this.startAt = performance.now() + (typeof delayMs === 'number' ? delayMs : 1500);
+    // Prefer absolute startAt epoch; fallback to delayMs
+    const startEpoch = (m as any).startAt as number | undefined;
+    if (typeof startEpoch === 'number' && isFinite(startEpoch)) {
+      const remainMs = Math.max(300, startEpoch - Date.now());
+      this.startAt = performance.now() + remainMs;
+    } else {
+      const delayMs = typeof (m as any).delayMs === 'number' ? (m as any).delayMs : 1500;
+      this.startAt = performance.now() + delayMs;
+    }
         this.waiting = false;
         this.starting = true;
+        this.gameStarted = false;
         this.lastCountdownSecond = 4; // force first tick
       } else if (m.type === 'leave' && m.id !== myId) {
         this.toast = { text: 'Opponent left', t: 3 };
@@ -135,7 +158,12 @@ export class VersusOnline implements IScene {
         const pu = new PowerUp(m.x, m.y, kind);
         pu.vx = m.vx;
         (pu as any).pid = (m as any).pid;
-        this.powerups.push(pu);
+        // Queue pre-start; apply once the game starts
+        if (this.waiting || this.starting || !this.gameStarted) {
+          this.queuedPowerSpawns.push({ pid: (m as any).pid as string, kind, x: m.x, y: m.y, vx: m.vx });
+        } else {
+          this.powerups.push(pu);
+        }
       } else if (m.type === 'pickup') {
         const pid = (m as any).pid as string;
         const idx = this.powerups.findIndex(p => (p as any).pid === pid);
@@ -165,6 +193,7 @@ export class VersusOnline implements IScene {
   // Avoid browser gestures on touch devices
     try { (engine.canvas.style as any).touchAction = 'none'; } catch {}
     const onPointer = (e: PointerEvent) => {
+      if (this.waiting || this.starting) { e.preventDefault(); return; }
       // Prevent default for context menu on canvas
       if (e.button === 2) e.preventDefault();
       const act = mapPointerButtonToAction(e.button ?? 0);
@@ -212,6 +241,8 @@ export class VersusOnline implements IScene {
       return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
     };
     const onTouch = (te: TouchEvent) => {
+      // During waiting/countdown, allow UI feedback and lefty toggle but block actions
+      const isPreGame = this.waiting || this.starting;
       // Shooting if two fingers, or a touch in the bottom-right corner
       const cw = engine.canvas.width, ch = engine.canvas.height;
       const rect = engine.canvas.getBoundingClientRect();
@@ -228,6 +259,21 @@ export class VersusOnline implements IScene {
         else if (hitBtn('right', x, y)) this.btnRightDown = true;
         else if (hitBtn('shoot', x, y)) this.btnShootDown = true;
       }
+      // Double-tap bottom-left corner toggles lefty (allowed pre-game too)
+      if (te.touches.length === 1) {
+        const t = te.touches.item(0)!;
+        const x = (t.clientX - rect.left) * sx;
+        const y = (t.clientY - rect.top) * sy;
+        if (x < cw * 0.2 && y > ch * 0.8) {
+          const now = performance.now();
+          if (now - this.lastLeftCornerTap < 500) {
+            this.lefty = !this.lefty; this.toast = { text: `Left-handed ${this.lefty ? 'ON' : 'OFF'}`, t: 2.2 };
+            try { localStorage.setItem('lefty', this.lefty ? '1' : '0'); } catch {}
+          }
+          this.lastLeftCornerTap = now;
+        }
+      }
+      if (isPreGame) { return; }
       let inShootCorner = false;
       for (let i = 0; i < te.touches.length; i++) {
         const t = te.touches.item(i)!;
@@ -245,20 +291,6 @@ export class VersusOnline implements IScene {
         }
         this.touchShootHeld = true;
         return;
-      }
-      // Double-tap bottom-left corner toggles lefty
-      if (te.touches.length === 1) {
-        const t = te.touches.item(0)!;
-        const x = (t.clientX - rect.left) * sx;
-        const y = (t.clientY - rect.top) * sy;
-        if (x < cw * 0.2 && y > ch * 0.8) {
-          const now = performance.now();
-          if (now - this.lastLeftCornerTap < 500) {
-            this.lefty = !this.lefty; this.toast = { text: `Left-handed ${this.lefty ? 'ON' : 'OFF'}`, t: 2.2 };
-            try { localStorage.setItem('lefty', this.lefty ? '1' : '0'); } catch {}
-          }
-          this.lastLeftCornerTap = now;
-        }
       }
       // Otherwise tap = flap
       Physics.jump(this.p1); Audio.flap();
@@ -321,6 +353,14 @@ export class VersusOnline implements IScene {
 
   update(dt: number, engine: GameEngine) {
     if (this.paused) return;
+    // Update floaters
+    for (let i = this.floaters.length - 1; i >= 0; i--) {
+      const f = this.floaters[i];
+      f.t -= dt; f.y += f.vy * dt;
+      if (f.t <= 0) this.floaters.splice(i, 1);
+    }
+    // Decay camera shake
+    if (this.shakeT > 0) this.shakeT = Math.max(0, this.shakeT - dt);
     if (this.waiting) {
       // Periodic presence while waiting so peers that joined late can see us
       if (this.rt && this.myId) {
@@ -333,7 +373,7 @@ export class VersusOnline implements IScene {
       // Show simple waiting room background and hint via render()
       return;
     }
-    // Pre-game synchronized countdown
+  // Pre-game synchronized countdown
     if (this.starting) {
       const now = performance.now();
       const remain = Math.max(0, this.startAt - now);
@@ -350,6 +390,23 @@ export class VersusOnline implements IScene {
       }
       if (remain <= 0) {
         this.starting = false;
+        this.gameStarted = true;
+        // Flush queued spawns and powerups
+        const h = engine.canvas.height;
+        for (const s of this.queuedSpawns) {
+          const x = engine.canvas.width + (s.w ?? 80);
+          const w = s.w ?? 80;
+          this.speed = s.speed;
+          this.obstacles.push(new Obstacle(x, 0, w, s.topH, this.speed));
+          this.obstacles.push(new Obstacle(x, s.topH + s.gap, w, h - (s.topH + s.gap), this.speed));
+        }
+        this.queuedSpawns = [];
+        for (const qp of this.queuedPowerSpawns) {
+          const pu = new PowerUp(qp.x, qp.y, qp.kind);
+          pu.vx = qp.vx; (pu as any).pid = qp.pid;
+          this.powerups.push(pu);
+        }
+        this.queuedPowerSpawns = [];
       } else {
         // small ambient particles while waiting to go
         this.particles.update(dt);
@@ -357,8 +414,8 @@ export class VersusOnline implements IScene {
         return; // block gameplay until countdown ends
       }
     }
-    // local input
-    if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) {
+    // local input (block during waiting or starting)
+    if (!this.waiting && !this.starting && (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp'))) {
       Physics.jump(this.p1); Audio.flap();
       try { navigator.vibrate?.(10); } catch {}
       // Spark burst on flap
@@ -379,7 +436,7 @@ export class VersusOnline implements IScene {
       // Flap on rising edge of A / Cross
       if (isPressed(0) && !wasPressed(0)) { Physics.jump(this.p1); Audio.flap(); try { navigator.vibrate?.(10); } catch {} }
       // Shoot when B(1) or X(2) held
-      if (isPressed(1) || isPressed(2)) this.shootingHeld = true; else if (!isPressed(1) && !isPressed(2)) this.shootingHeld = false;
+  if (!this.waiting && !this.starting && (isPressed(1) || isPressed(2))) this.shootingHeld = true; else if (!isPressed(1) && !isPressed(2)) this.shootingHeld = false;
       // Store current
       this.prevPadButtons = buttons.map((b:any)=>!!b.pressed);
     }
@@ -390,7 +447,7 @@ export class VersusOnline implements IScene {
     // shooting (hold supported for mouse, keyboard, and touch)
     const baseCd = 0.35; // seconds
     const shootKeysDown = engine.input.isDown('ControlLeft') || engine.input.isDown('ControlRight') || engine.input.isDown('KeyJ') || engine.input.isDown('ShiftLeft') || engine.input.isDown('KeyF');
-    const wantShoot = this.shootingHeld || this.touchShootHeld || !!shootKeysDown;
+  const wantShoot = (!this.waiting && !this.starting) && (this.shootingHeld || this.touchShootHeld || !!shootKeysDown);
     if (wantShoot && this.p1.fireCooldown <= 0) {
       this.fireBullet(this.p1, 'p1', engine);
       try { navigator.vibrate?.(5); } catch {}
@@ -400,7 +457,7 @@ export class VersusOnline implements IScene {
     // bounds
     const h = engine.canvas.height; this.p1.y = Math.max(0, Math.min(h - this.p1.height, this.p1.y));
     // send compact input/state occasionally
-    if (this.rt) {
+  if (this.rt) {
       this.sendAccum += dt;
       const interval = 1/25; // 25 Hz
       if (this.sendAccum >= interval) {
@@ -455,7 +512,7 @@ export class VersusOnline implements IScene {
       const maxTop = h - gap - 40;
       const topH = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
       const w = 80; const x = engine.canvas.width + w;
-      if (this.isLeader) {
+      if (this.isLeader && this.gameStarted) {
         // spawn locally and broadcast
         this.obstacles.push(new Obstacle(x, 0, w, topH, this.speed));
         this.obstacles.push(new Obstacle(x, topH + gap, w, h - (topH + gap), this.speed));
@@ -483,30 +540,44 @@ export class VersusOnline implements IScene {
     const W = engine.canvas.width, H = engine.canvas.height;
     const hit = (b: Projectile, o: Obstacle) => Physics.checkCollision({ x: b.x, y: b.y, width: b.width, height: b.height } as any, o);
     for (const b of this.bullets) {
-      for (const o of this.obstacles) { if (hit(b, o)) { b.active = false; Audio.combo(1); } }
+      for (const o of this.obstacles) {
+        if (hit(b, o)) {
+          b.active = false; Audio.combo(1);
+          // Impact sparks
+          const cx = b.x + b.width * 0.5, cy = b.y + b.height * 0.5;
+          this.particles.burst(cx, cy, 6, (b.color as string) || '#ffd166');
+        }
+      }
     }
     for (const b of this.enemyBullets) {
-      for (const o of this.obstacles) { if (hit(b, o)) { b.active = false; } }
+      for (const o of this.obstacles) {
+        if (hit(b, o)) { b.active = false; this.particles.burst(b.x + b.width * 0.5, b.y + b.height * 0.5, 4, '#ff7b72'); }
+      }
     }
     this.bullets = this.bullets.filter(b => b.active && !b.isOffScreen(W,H));
     this.enemyBullets = this.enemyBullets.filter(b => b.active && !b.isOffScreen(W,H));
     // Pickups for local player
-    for (let i = 0; i < this.powerups.length; i++) {
+  for (let i = 0; i < this.powerups.length; i++) {
       const pu = this.powerups[i];
       if (Physics.checkCollision(this.p1, pu)) {
         this.applyPowerUp(pu.type);
         const pid = (pu as any).pid as string | undefined;
         if (pid) this.rt?.send({ type: 'pickup', id: this.rt!.id, t: performance.now(), pid });
-        this.powerups.splice(i, 1); i--;
+    // Sparkle burst on pickup
+    const colorMap: Record<string,string> = { heal:'#7ee787', rapid:'#f7b84a', shield:'#8b8efb', multishot:'#38bdf8', bigshot:'#fb7185', slowmo:'#a78bfa', magnet:'#f472b6' };
+    this.particles.burst(pu.x + pu.width/2, pu.y + pu.height/2, 12, colorMap[pu.type] || '#ffffff');
+    this.powerups.splice(i, 1); i--;
         Audio.score();
       }
     }
     // Collisions and scoring similar to single-player
     // collision with pipes for p1
-    for (const o of this.obstacles) {
+  for (const o of this.obstacles) {
       if ((Physics as any).checkCollision && (Physics as any).checkCollision(this.p1, o)) {
         this.p1.hp = Math.max(0, (this.p1.hp ?? 3) - 1);
         Audio.hit();
+    // Camera shake on hit
+    this.triggerShake(4, 0.25);
         if (this.p1.hp <= 0) { this.paused = true; this.toast = { text: 'You crashed!', t: 3 }; }
       }
     }
@@ -516,11 +587,22 @@ export class VersusOnline implements IScene {
       const centerX = top.x + top.width / 2;
       if ((top as any).counted !== true && centerX < this.p1.x) {
         (top as any).counted = true; this.s1 += 1; Audio.score();
+        // +1 floater near HUD
+        this.floaters.push({ text: '+1', x: 56, y: 28, vy: -20, t: 1.0, life: 1.0, color: '#7ee787' });
       }
     }
   }
 
   render(ctx: CanvasRenderingContext2D, engine: GameEngine) {
+    // Camera shake transform
+    ctx.save();
+    if (this.shakeT > 0 && this.shakeTotal > 0) {
+      const k = this.shakeT / this.shakeTotal;
+      const amp = this.shakeAmp * (0.5 + 0.5 * k);
+      const ox = (Math.random() * 2 - 1) * amp;
+      const oy = (Math.random() * 2 - 1) * amp;
+      ctx.translate(ox, oy);
+    }
     this.renderer.clear(1/60);
     if (this.waiting) {
       // Waiting room screen
@@ -574,6 +656,29 @@ export class VersusOnline implements IScene {
     }
     this.renderer.drawPlayer(this.p1, '#58a6ff');
     this.renderer.drawPlayer(this.p2, '#ff7b72');
+    // Draw projectiles
+    for (const b of this.bullets) this.renderer.drawProjectile(b);
+    for (const b of this.enemyBullets) this.renderer.drawProjectile(b);
+    // Draw power-ups
+    for (const pu of this.powerups) this.renderer.drawPowerUp(pu);
+    // Magnet visual trail/attraction overlay
+    if (performance.now() < this.magnetUntil) {
+      ctx.save(); ctx.globalAlpha = 0.6;
+      for (const pu of this.powerups) {
+        const cx = pu.x + pu.width/2, cy = pu.y + pu.height/2;
+        const dx = (this.p1.x + this.p1.width/2) - cx;
+        const dy = (this.p1.y + this.p1.height/2) - cy;
+        const len = Math.max(1, Math.hypot(dx, dy));
+        const ux = dx / len, uy = dy / len;
+        ctx.fillStyle = '#f472b6aa';
+        for (let i = 1; i <= 2; i++) {
+          const px = cx + ux * i * 8;
+          const py = cy + uy * i * 8;
+          ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI*2); ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
     // Render particles above players
     this.particles.render(ctx);
     this.remoteParticles.render(ctx);
@@ -654,6 +759,14 @@ export class VersusOnline implements IScene {
       ctx.fillText('Flap: Click/Space/ArrowUp • Move: ←/→ or A/D • Shoot: Right Click or Ctrl/J (hold)', 28, 100);
       ctx.restore();
     }
+    // Floaters (+1 etc.)
+    for (const f of this.floaters) {
+      const a = Math.max(0, f.t / f.life);
+      ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = f.color || '#e8e8f0';
+      ctx.font = '700 16px system-ui';
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.restore();
+    }
     // Toasts
     if (this.toast) {
       this.toast.t -= 1/60;
@@ -669,6 +782,8 @@ export class VersusOnline implements IScene {
       ctx.restore();
       if (this.toast.t <= 0) this.toast = null;
     }
+    // Restore after camera shake
+    ctx.restore();
   }
 
   private isRapid() {
@@ -682,6 +797,7 @@ export class VersusOnline implements IScene {
     const baseV = 420;
     const color = owner === 'p1' ? '#ffd166' : '#ff7b72';
     const sizeMul = performance.now() < this.bigshotUntil ? 1.6 : 1.0;
+  if (owner === 'p1' && sizeMul > 1.0) this.triggerShake(1.2, 0.12);
     const mk = (vx: number, vy: number) => {
       const b = new Projectile(p.x + p.width, y, vx, vy, owner);
       b.color = color; b.width = 10 * sizeMul; b.height = 4 * sizeMul;
@@ -690,6 +806,10 @@ export class VersusOnline implements IScene {
     };
     const multishot = performance.now() < this.multishotUntil;
     if (multishot) { mk(baseV, -40); mk(baseV, 0); mk(baseV, 40); } else { mk(baseV, 0); }
+  }
+
+  private triggerShake(amp: number, dur: number) {
+    this.shakeAmp = amp; this.shakeT = dur; this.shakeTotal = dur;
   }
 
   private applyPowerUp(type: PowerType) {
