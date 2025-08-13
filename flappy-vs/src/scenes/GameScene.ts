@@ -1,4 +1,5 @@
 import GameEngine, { IScene } from '../game/engine';
+import TitleScene from './TitleScene';
 import { Player } from '../entities/Player';
 import { Obstacle } from '../entities/Obstacle';
 import { HUD } from '../entities/HUD';
@@ -255,9 +256,15 @@ export class GameScene implements IScene {
 
     update(dt: number, engine: GameEngine): void {
     const canvasH = engine.canvas.height;
-    if (engine.input.wasPressed('KeyP')) this.paused = !this.paused;
+    // Pause menu handling first so Esc works while paused
+    if (engine.input.wasPressed('Escape') || engine.input.wasPressed('KeyP')) this.paused = !this.paused;
+    if (this.paused) {
+        if (engine.input.wasPressed('KeyR')) { this.init(engine); this.paused = false; return; }
+        if (engine.input.wasPressed('Enter') || engine.input.wasPressed('KeyT')) { engine.setScene(new TitleScene()); return; }
+        // Stay paused otherwise
+        return;
+    }
     if (engine.input.wasPressed('KeyR')) this.init(engine);
-    if (this.paused) return;
         // Global slow-mo
     const slowFactor = this.slowmoT > 0 ? 0.7 : 1.0;
     const gdt = dt * slowFactor;
@@ -520,16 +527,24 @@ export class GameScene implements IScene {
     }
 
     render(ctx: CanvasRenderingContext2D, engine: GameEngine): void {
-        const shake = this.shakeT > 0 ? (Math.random() - 0.5) * 8 : 0;
         ctx.save();
-        ctx.translate(shake, shake);
-        this.renderer.clear(1/60);
-    for (const o of this.obstacles) this.renderer.drawObstacle(o);
-    for (const e of this.enemies) this.renderer.drawEnemy(e);
-    for (const p of this.powerUps) this.renderer.drawPowerUp(p);
+        // 1) World (no shake)
+        this.renderer.clear(1 / 60);
+        for (const o of this.obstacles) this.renderer.drawObstacle(o);
+        for (const e of this.enemies) this.renderer.drawEnemy(e);
+        for (const p of this.powerUps) this.renderer.drawPowerUp(p);
+
+        // 2) Foreground (player, bullets, particles) with gentle shake
+        const maxAmp = 4; // px
+        const amp = Settings.reducedMotion ? 0 : (this.shakeT > 0 ? Math.min(maxAmp, maxAmp * Math.min(1, this.shakeT / 0.2)) : 0);
+        ctx.save();
+        if (amp > 0) {
+            const ox = (Math.random() - 0.5) * 2 * amp;
+            const oy = (Math.random() - 0.5) * 2 * amp;
+            ctx.translate(ox, oy);
+        }
         const playerColor = this.hurtT > 0 ? '#f87171' : '#58a6ff';
         this.renderer.drawPlayer(this.player, playerColor);
-        // Player name label above character
         if (this.playerName) {
             const label = this.playerName.slice(0, 18);
             const cx = this.player.x + this.player.width / 2;
@@ -545,106 +560,100 @@ export class GameScene implements IScene {
             ctx.fillText(label, cx, ty);
             ctx.restore();
         }
-    for (const b of this.bullets) this.renderer.drawProjectile(b);
+        for (const b of this.bullets) this.renderer.drawProjectile(b);
         this.particles.render(ctx);
+        ctx.restore();
+
+        // 3) HUD and overlays (no shake)
         this.hud.render(ctx, this.score, undefined, this.player.hp);
+
         // Tiny icons for active power-ups next to hearts
         {
-            type Icon = {active:boolean,color:string,glyph:string, rem:number, dur:number};
+            type Icon = { active: boolean; color: string; glyph: string; rem: number; dur: number };
             const iconList: Icon[] = [
-                { active: this.rapidT > 0,     color: '#f7b84a', glyph: 'R', rem: this.rapidT, dur: 8 },
+                { active: this.rapidT > 0, color: '#f7b84a', glyph: 'R', rem: this.rapidT, dur: 8 },
                 { active: this.multishotT > 0, color: '#38bdf8', glyph: 'M', rem: this.multishotT, dur: 8 },
-                { active: this.bigshotT > 0,   color: '#fb7185', glyph: 'B', rem: this.bigshotT, dur: 8 },
-                { active: this.slowmoT > 0,    color: '#a78bfa', glyph: '⌛', rem: this.slowmoT, dur: 3.5 },
-                { active: this.magnetT > 0,    color: '#f472b6', glyph: 'U', rem: this.magnetT, dur: 8 },
+                { active: this.bigshotT > 0, color: '#fb7185', glyph: 'B', rem: this.bigshotT, dur: 8 },
+                { active: this.slowmoT > 0, color: '#a78bfa', glyph: '⌛', rem: this.slowmoT, dur: 3.5 },
+                { active: this.magnetT > 0, color: '#f472b6', glyph: 'U', rem: this.magnetT, dur: 8 },
             ];
             const hp = this.player.hp ?? 0;
             const startX = 16 + hp * 18 + 12; // after hearts row
-            let x = startX; let y = 36; // hearts baseline
-            const w = 12, h = 12, r = 3, pad = 6;
-            const maxX = (engine.canvas.width - 16);
-            for (const a of iconList) {
-                if (!a.active) continue;
-                if (x + w > maxX) { x = startX; y += h + 6; }
+            let ix = startX;
+            let iy = 36; // hearts baseline
+            const iw = 12, ih = 12, ir = 3, pad = 6;
+            const maxX = engine.canvas.width - 16;
+            for (const it of iconList) {
+                if (!it.active) continue;
+                if (ix + iw > maxX) {
+                    ix = startX;
+                    iy += ih + 6;
+                }
                 ctx.save();
                 ctx.globalAlpha = 0.95;
-                ctx.fillStyle = a.color;
-                ctx.beginPath(); ctx.roundRect(x, y + 2, w, h, r); ctx.fill();
+                ctx.fillStyle = it.color;
+                ctx.beginPath();
+                ctx.roundRect(ix, iy + 2, iw, ih, ir);
+                ctx.fill();
                 // countdown arc
-                const frac = Math.max(0, Math.min(1, a.rem / a.dur));
-                ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
-                ctx.beginPath(); ctx.arc(x + w/2, y + 2 + h/2, 6, -Math.PI/2, -Math.PI/2 + frac * Math.PI * 2);
+                const frac = Math.max(0, Math.min(1, it.rem / it.dur));
+                ctx.strokeStyle = '#0f172a';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(ix + iw / 2, iy + 2 + ih / 2, 6, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
                 ctx.stroke();
-                // glyph
                 ctx.fillStyle = '#0f172a';
                 ctx.font = '700 9px system-ui';
-                const tw = ctx.measureText(a.glyph).width;
-                ctx.fillText(a.glyph, x + (w - tw) / 2, y + 11);
+                const tw = ctx.measureText(it.glyph).width;
+                ctx.fillText(it.glyph, ix + (iw - tw) / 2, iy + 11);
                 ctx.restore();
-                x += w + pad;
+                ix += iw + pad;
             }
         }
+
         // Transient pickup badges (fade out)
         if (this.pickupBadgeT > 0) {
-            const a = Math.min(1, this.pickupBadgeT / 1.4);
+            const badgeAlpha = Math.min(1, this.pickupBadgeT / 1.4);
             ctx.save();
-            ctx.globalAlpha = a * 0.9;
-            const badges: Array<{label:string, active:boolean, color:string}> = [
+            ctx.globalAlpha = badgeAlpha * 0.9;
+            const badges: Array<{ label: string; active: boolean; color: string }> = [
                 { label: 'Rapid', active: this.rapidT > 0, color: '#f7b84a' },
                 { label: 'Multi', active: this.multishotT > 0, color: '#38bdf8' },
-                { label: 'Big',   active: this.bigshotT > 0, color: '#fb7185' },
-                { label: 'Slow',  active: this.slowmoT > 0, color: '#a78bfa' },
-                { label: 'Mag',   active: this.magnetT > 0, color: '#f472b6' },
+                { label: 'Big', active: this.bigshotT > 0, color: '#fb7185' },
+                { label: 'Slow', active: this.slowmoT > 0, color: '#a78bfa' },
+                { label: 'Mag', active: this.magnetT > 0, color: '#f472b6' },
             ].filter(b => b.active);
             let bx = 16, by = 56 + 26; // below HUD line
             for (const b of badges) {
-                const w = 86, h = 22, r = 8;
+                const bw = 86, bh = 22, br = 8;
                 ctx.fillStyle = '#0f172acc';
-                ctx.beginPath(); ctx.roundRect(bx, by, w, h, r); ctx.fill();
+                ctx.beginPath();
+                ctx.roundRect(bx, by, bw, bh, br);
+                ctx.fill();
                 ctx.fillStyle = b.color + 'dd';
-                ctx.beginPath(); ctx.roundRect(bx+2, by+2, w-4, h-4, 6); ctx.strokeStyle = b.color + '66'; ctx.lineWidth = 2; ctx.stroke();
-                ctx.fillStyle = '#e8e8f0'; ctx.font = '700 12px system-ui';
+                ctx.beginPath();
+                ctx.roundRect(bx + 2, by + 2, bw - 4, bh - 4, 6);
+                ctx.strokeStyle = b.color + '66';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = '#e8e8f0';
+                ctx.font = '700 12px system-ui';
                 ctx.fillText(b.label, bx + 10, by + 15);
-                bx += w + 8;
+                bx += bw + 8;
             }
             ctx.restore();
         }
+
         // Slowmo vignette when active
         if (this.slowmoT > 0) {
-            const a = Math.min(0.25, 0.15 + (this.slowmoT / 4) * 0.1);
+            const slowmoAlpha = Math.min(0.25, 0.15 + (this.slowmoT / 4) * 0.1);
             ctx.save();
-            ctx.globalAlpha = a;
+            ctx.globalAlpha = slowmoAlpha;
             ctx.fillStyle = '#0b1022';
             ctx.fillRect(0, 0, engine.canvas.width, engine.canvas.height);
             ctx.restore();
         }
-        // Active power-up badges with timers
-        const badges: Array<{label:string, t:number, d:number, color:string}> = [];
-        if (this.rapidT > 0) badges.push({ label: 'Rapid', t: this.rapidT, d: 8, color: '#f7b84a' });
-        if (this.multishotT > 0) badges.push({ label: 'Multi', t: this.multishotT, d: 8, color: '#38bdf8' });
-        if (this.bigshotT > 0) badges.push({ label: 'Big', t: this.bigshotT, d: 8, color: '#fb7185' });
-        if (this.slowmoT > 0) badges.push({ label: 'Slow', t: this.slowmoT, d: 4, color: '#a78bfa' });
-        if (this.magnetT > 0) badges.push({ label: 'Mag', t: this.magnetT, d: 8, color: '#f472b6' });
-        if (badges.length) {
-            let bx = 16, by = 56;
-            for (const b of badges) {
-                const w = 74, h = 20, r = 8;
-                ctx.save();
-                ctx.globalAlpha = 0.9;
-                ctx.fillStyle = '#0f172acc';
-                ctx.beginPath(); ctx.roundRect(bx, by, w, h, r); ctx.fill();
-                // progress
-                const frac = Math.max(0, Math.min(1, b.t / b.d));
-                ctx.fillStyle = b.color + 'aa';
-                ctx.beginPath(); ctx.roundRect(bx+2, by+h-6, (w-4) * frac, 4, 3); ctx.fill();
-                // label
-                ctx.fillStyle = '#e8e8f0';
-                ctx.font = '600 12px system-ui';
-                ctx.fillText(b.label, bx + 8, by + 14);
-                ctx.restore();
-                bx += w + 8;
-            }
-        }
+
         // Combo indicator near score
         if (this.comboT > 0 && this.combo > 1) {
             ctx.save();
@@ -653,18 +662,20 @@ export class GameScene implements IScene {
             ctx.fillText(`Combo x${this.combo}`, 16, 46);
             ctx.restore();
         }
+
         // Floating texts render
         if (this.floats.length) {
             for (const f of this.floats) {
-                const a = Math.max(0, Math.min(1, f.ttl / 0.9));
+                const floatAlpha = Math.max(0, Math.min(1, f.ttl / 0.9));
                 ctx.save();
-                ctx.globalAlpha = a;
+                ctx.globalAlpha = floatAlpha;
                 ctx.fillStyle = '#ffd166';
                 ctx.font = '700 18px system-ui';
                 ctx.fillText(f.text, f.x, f.y);
                 ctx.restore();
             }
         }
+
         // On-screen buttons for touch devices
         if (this.isTouch) {
             // Ensure rects are up-to-date with current canvas size
@@ -672,13 +683,13 @@ export class GameScene implements IScene {
             const size = Math.max(60, Math.min(120, Math.floor(Math.min(w, h) * 0.14)));
             const pad = 24;
             this.btnRects = {
-                left:  { x: pad, y: h - size - pad, w: size, h: size },
+                left: { x: pad, y: h - size - pad, w: size, h: size },
                 right: { x: pad + size + 16, y: h - size - pad, w: size, h: size },
                 shoot: { x: w - size - pad, y: h - size - pad, w: size, h: size },
             };
-            const drawBtn = (r:{x:number,y:number,w:number,h:number}, active:boolean, label: 'L'|'R'|'S') => {
+            const drawBtn = (r: { x: number; y: number; w: number; h: number }, active: boolean, label: string) => {
                 ctx.save();
-                ctx.globalAlpha = 0.5;
+                ctx.globalAlpha = 0.6;
                 ctx.fillStyle = active ? '#58a6ff' : '#0f172a';
                 ctx.strokeStyle = '#58a6ff88';
                 ctx.lineWidth = 4;
@@ -687,20 +698,21 @@ export class GameScene implements IScene {
                 ctx.fill();
                 ctx.stroke();
                 ctx.fillStyle = '#e8e8f0';
-                ctx.font = '700 28px system-ui';
-                const glyph = label === 'L' ? '\u25C0' : (label === 'R' ? '\u25B6' : '\u25CF');
-                const tw = ctx.measureText(glyph).width;
-                ctx.fillText(glyph, r.x + (r.w - tw) / 2, r.y + r.h / 2 + 10);
+                ctx.font = '700 16px system-ui';
+                const tw = ctx.measureText(label).width;
+                ctx.fillText(label, r.x + (r.w - tw) / 2, r.y + r.h / 2 + 6);
                 ctx.restore();
             };
             drawBtn(this.btnRects.left, this.btnLeftDown, 'L');
             drawBtn(this.btnRects.right, this.btnRightDown, 'R');
             drawBtn(this.btnRects.shoot, this.btnShootDown, 'S');
         }
+
+        // Controls hint
         if (this.hintT > 0) {
-            const a = Math.min(0.8, this.hintT / 4);
+            const hintAlpha = Math.min(0.8, this.hintT / 4);
             ctx.save();
-            ctx.globalAlpha = a;
+            ctx.globalAlpha = hintAlpha;
             ctx.fillStyle = '#00000088';
             ctx.fillRect(20, 70, 520, 56);
             ctx.fillStyle = '#e8e8f0';
@@ -708,13 +720,22 @@ export class GameScene implements IScene {
             ctx.fillText('Flap: Space/ArrowUp/W or Click • Move: Arrows or A/D • Shoot: Right Click or Ctrl/J (hold)', 28, 100);
             ctx.restore();
         }
+
         ctx.restore();
+        // Paused/Game Over overlays
         if (this.paused) {
             ctx.fillStyle = '#00000088';
             ctx.fillRect(0, 0, engine.canvas.width, engine.canvas.height);
-            ctx.fillStyle = '#e8e8f0';
-            ctx.font = '700 28px system-ui';
-            ctx.fillText('Paused (P). R = Restart, Esc = Title', 40, 120);
+            // Pause card
+            const mw = Math.min(420, engine.canvas.width - 40);
+            const mh = 180; const mx = (engine.canvas.width - mw)/2; const my = Math.max(60, engine.canvas.height*0.3);
+            ctx.fillStyle = '#0f172ae6'; ctx.beginPath(); ctx.roundRect(mx, my, mw, mh, 12); ctx.fill();
+            ctx.strokeStyle = '#58a6ff55'; ctx.stroke();
+            ctx.fillStyle = '#e8e8f0'; ctx.font = '800 24px system-ui'; ctx.fillText('Paused', mx + 16, my + 34);
+            ctx.font = '600 15px system-ui';
+            ctx.fillText('Enter/T: Return to Main Menu', mx + 16, my + 74);
+            ctx.fillText('R: Restart', mx + 16, my + 100);
+            ctx.fillText('Esc/P: Resume', mx + 16, my + 126);
         }
         if (this.gameOver) {
             ctx.fillStyle = '#00000088';
@@ -740,7 +761,7 @@ export class GameScene implements IScene {
             ctx.stroke();
             ctx.fillStyle = '#e8e8f0';
             ctx.font = '700 28px system-ui';
-            ctx.fillText('⟲', rx + size/2 - 10, ry + size/2 + 12);
+            ctx.fillText('⟲', rx + size / 2 - 10, ry + size / 2 + 12);
             ctx.restore();
         }
     }

@@ -1,4 +1,5 @@
 import GameEngine, { IScene } from '../game/engine';
+import TitleScene from './TitleScene';
 import { Player } from '../entities/Player';
 import { Obstacle } from '../entities/Obstacle';
 import { HUD } from '../entities/HUD';
@@ -6,6 +7,7 @@ import { Physics } from '../game/physics';
 import { Renderer } from '../game/renderer';
 import { Audio } from '../game/audio';
 import { Particles } from '../game/particles';
+import { Settings } from '../game/settings';
 
 export class VersusScene implements IScene {
     p1 = new Player(80, 140, 26, 26);
@@ -36,9 +38,15 @@ export class VersusScene implements IScene {
 
     update(dt: number, engine: GameEngine): void {
         const h = engine.canvas.height;
-    if (engine.input.wasPressed('KeyP')) this.paused = !this.paused;
+    // decay shake
+    this.shakeT = Math.max(0, this.shakeT - dt);
+    if (engine.input.wasPressed('Escape') || engine.input.wasPressed('KeyP')) this.paused = !this.paused;
+    if (this.paused) {
+        if (engine.input.wasPressed('KeyR')) { this.init(engine); this.paused = false; return; }
+        if (engine.input.wasPressed('Enter') || engine.input.wasPressed('KeyT')) { engine.setScene(new TitleScene()); return; }
+        return;
+    }
     if (engine.input.wasPressed('KeyR')) this.init(engine);
-    if (this.paused) return;
         // Controls: P1 arrows/space; P2 W/S
     if (engine.input.wasPressed('Space') || engine.input.wasPressed('ArrowUp')) { Physics.jump(this.p1); Audio.flap(); this.particles.burst(this.p1.x, this.p1.y+this.p1.height, 6, '#88ccff88'); }
     if (engine.input.wasPressed('KeyW')) { Physics.jump(this.p2); Audio.flap(); this.particles.burst(this.p2.x, this.p2.y+this.p2.height, 6, '#ffb08888'); }
@@ -101,23 +109,39 @@ export class VersusScene implements IScene {
         }
     }
 
-    render(ctx: CanvasRenderingContext2D, _engine: GameEngine): void {
-    const shake = this.shakeT > 0 ? (Math.random() - 0.5) * 8 : 0;
-    ctx.save();
-    ctx.translate(shake, shake);
-    this.renderer.clear(1/60);
+        render(ctx: CanvasRenderingContext2D, _engine: GameEngine): void {
+        ctx.save();
+        // 1) World (no shake)
+        this.renderer.clear(1/60);
         for (const o of this.obstacles) this.renderer.drawObstacle(o);
+        // 2) Foreground (players + particles) with gentle shake
+        const maxAmp = 4;
+        const amp = Settings.reducedMotion ? 0 : (this.shakeT > 0 ? Math.min(maxAmp, 8 * Math.min(1, this.shakeT / 0.25)) : 0);
+        ctx.save();
+        if (amp > 0) {
+            const ox = (Math.random() - 0.5) * 2 * amp;
+            const oy = (Math.random() - 0.5) * 2 * amp;
+            ctx.translate(ox, oy);
+        }
         this.renderer.drawPlayer(this.p1, '#58a6ff');
         this.renderer.drawPlayer(this.p2, '#ff7b72');
-    this.particles.render(ctx);
-    this.hud.render(ctx, this.s1, this.s2);
-    ctx.restore();
+        this.particles.render(ctx);
+        ctx.restore();
+        // 3) HUD (no shake)
+        this.hud.render(ctx, this.s1, this.s2);
+        ctx.restore();
         if (this.paused) {
             ctx.fillStyle = '#00000088';
             ctx.fillRect(0, 0, _engine.canvas.width, _engine.canvas.height);
-            ctx.fillStyle = '#e8e8f0';
-            ctx.font = '700 28px system-ui';
-            ctx.fillText('Paused (P). R = Restart, Esc = Title', 40, 120);
+            const mw = Math.min(420, _engine.canvas.width - 40);
+            const mh = 160; const mx = (_engine.canvas.width - mw)/2; const my = Math.max(60, _engine.canvas.height*0.3);
+            ctx.fillStyle = '#0f172ae6'; ctx.beginPath(); ctx.roundRect(mx, my, mw, mh, 12); ctx.fill();
+            ctx.strokeStyle = '#58a6ff55'; ctx.stroke();
+            ctx.fillStyle = '#e8e8f0'; ctx.font = '800 24px system-ui'; ctx.fillText('Paused', mx + 16, my + 34);
+            ctx.font = '600 15px system-ui';
+            ctx.fillText('Enter/T: Return to Main Menu', mx + 16, my + 74);
+            ctx.fillText('R: Restart', mx + 16, my + 100);
+            ctx.fillText('Esc/P: Resume', mx + 16, my + 126);
         }
     }
 }

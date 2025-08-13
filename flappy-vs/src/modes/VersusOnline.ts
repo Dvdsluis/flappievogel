@@ -10,6 +10,7 @@ import { PowerUp, type PowerType } from '../entities/PowerUp';
 import { Projectile } from '../entities/Projectile';
 import { POWERUPS, pickPowerUp } from '../game/powerups';
 import { mapPointerButtonToAction } from '../game/controls';
+import { Settings } from '../game/settings';
 import { Realtime, RTMessage } from '../net/realtime';
 
 export class VersusOnline implements IScene {
@@ -352,7 +353,13 @@ export class VersusOnline implements IScene {
   }
 
   update(dt: number, engine: GameEngine) {
-    if (this.paused) return;
+    // Global pause handling first
+    if (engine.input.wasPressed('Escape') || engine.input.wasPressed('KeyP')) this.paused = !this.paused;
+    if (this.paused) {
+      if (engine.input.wasPressed('KeyR')) { /* soft reset: just clear scores and obstacles */ this.s1 = this.s2 = 0; this.obstacles = []; this.powerups = []; this.bullets = []; this.enemyBullets = []; this.paused = false; }
+      // Return to title on Enter/T handled in render overlay prompt
+      return;
+    }
     // Update floaters
     for (let i = this.floaters.length - 1; i >= 0; i--) {
       const f = this.floaters[i];
@@ -594,15 +601,8 @@ export class VersusOnline implements IScene {
   }
 
   render(ctx: CanvasRenderingContext2D, engine: GameEngine) {
-    // Camera shake transform
     ctx.save();
-    if (this.shakeT > 0 && this.shakeTotal > 0) {
-      const k = this.shakeT / this.shakeTotal;
-      const amp = this.shakeAmp * (0.5 + 0.5 * k);
-      const ox = (Math.random() * 2 - 1) * amp;
-      const oy = (Math.random() * 2 - 1) * amp;
-      ctx.translate(ox, oy);
-    }
+    // 1) World (no shake)
     this.renderer.clear(1/60);
     if (this.waiting) {
       // Waiting room screen
@@ -654,12 +654,24 @@ export class VersusOnline implements IScene {
       const w = ctx.measureText(label).width;
       ctx.fillText(label, (engine.canvas.width - w)/2, engine.canvas.height * 0.35);
     }
+    // 2) Foreground (players, bullets, particles) with gentle shake
+    ctx.save();
+    if (this.shakeT > 0 && this.shakeTotal > 0) {
+      const k = this.shakeT / this.shakeTotal;
+      // Base amplitude is small for comfort
+      const base = this.shakeAmp * (0.5 + 0.5 * k);
+      const maxAmp = 4;
+      const amp = (typeof (Settings as any)?.reducedMotion !== 'undefined' && (Settings as any).reducedMotion) ? 0 : Math.min(maxAmp, base);
+      if (amp > 0) {
+        const ox = (Math.random() * 2 - 1) * amp;
+        const oy = (Math.random() * 2 - 1) * amp;
+        ctx.translate(ox, oy);
+      }
+    }
     this.renderer.drawPlayer(this.p1, '#58a6ff');
     this.renderer.drawPlayer(this.p2, '#ff7b72');
-    // Draw projectiles
     for (const b of this.bullets) this.renderer.drawProjectile(b);
     for (const b of this.enemyBullets) this.renderer.drawProjectile(b);
-    // Draw power-ups
     for (const pu of this.powerups) this.renderer.drawPowerUp(pu);
     // Magnet visual trail/attraction overlay
     if (performance.now() < this.magnetUntil) {
@@ -679,11 +691,13 @@ export class VersusOnline implements IScene {
       }
       ctx.restore();
     }
-    // Render particles above players
-    this.particles.render(ctx);
-    this.remoteParticles.render(ctx);
-    // draw obstacles
-    for (const o of this.obstacles) this.renderer.drawObstacle(o);
+  // Render particles above players
+  this.particles.render(ctx);
+  this.remoteParticles.render(ctx);
+  ctx.restore(); // end foreground shake
+  // draw obstacles
+  for (const o of this.obstacles) this.renderer.drawObstacle(o);
+  // 3) HUD (no shake)
   this.hud.render(ctx, this.s1, this.s2);
   // HUD status: show fire cooldown and active effects for P1
   const cdFrac = this.p1.fireCooldown > 0 ? Math.min(1, this.p1.fireCooldown / 0.35) : 0;
@@ -758,6 +772,20 @@ export class VersusOnline implements IScene {
       ctx.font = '600 16px system-ui';
       ctx.fillText('Flap: Click/Space/ArrowUp • Move: ←/→ or A/D • Shoot: Right Click or Ctrl/J (hold)', 28, 100);
       ctx.restore();
+      // Pause overlay when paused
+      if (this.paused) {
+        ctx.fillStyle = '#00000088';
+        ctx.fillRect(0, 0, engine.canvas.width, engine.canvas.height);
+        const mw = Math.min(460, engine.canvas.width - 40);
+        const mh = 190; const mx = (engine.canvas.width - mw)/2; const my = Math.max(60, engine.canvas.height*0.3);
+        ctx.fillStyle = '#0f172ae6'; ctx.beginPath(); ctx.roundRect(mx, my, mw, mh, 12); ctx.fill();
+        ctx.strokeStyle = '#58a6ff55'; ctx.stroke();
+        ctx.fillStyle = '#e8e8f0'; ctx.font = '800 22px system-ui'; ctx.fillText('Paused', mx + 16, my + 36);
+        ctx.font = '600 15px system-ui';
+        ctx.fillText('R: Reset Round', mx + 16, my + 76);
+        ctx.fillText('Esc/P: Resume', mx + 16, my + 102);
+        ctx.fillText('Open a new tab to return to menu', mx + 16, my + 128);
+      }
     }
     // Floaters (+1 etc.)
     for (const f of this.floaters) {
@@ -782,8 +810,7 @@ export class VersusOnline implements IScene {
       ctx.restore();
       if (this.toast.t <= 0) this.toast = null;
     }
-    // Restore after camera shake
-    ctx.restore();
+  ctx.restore();
   }
 
   private isRapid() {
