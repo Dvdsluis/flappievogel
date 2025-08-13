@@ -97,14 +97,40 @@ export class Renderer {
 
     drawObstacle(o: Obstacle) {
         const { ctx } = this;
-        // shaded pipe
-        const grad = ctx.createLinearGradient(o.x, o.y, o.x + o.width, o.y);
-        grad.addColorStop(0, '#2bc072');
-        grad.addColorStop(1, '#3be688');
+        // Softer, cooler pipe with rounded edges and subtle shading
+        const x = o.x, y = o.y, w = o.width, h = o.height;
+        ctx.save();
+        // Body gradient (desaturated teal)
+        const grad = ctx.createLinearGradient(x, y, x + w, y);
+        grad.addColorStop(0, '#1e7755');
+        grad.addColorStop(1, '#2a9a6d');
         ctx.fillStyle = grad;
-        ctx.fillRect(o.x, o.y, o.width, o.height);
-        ctx.fillStyle = '#ffffff18';
-        ctx.fillRect(o.x + 6, o.y, 6, o.height); // highlight stripe
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, Math.min(8, w * 0.25));
+        ctx.fill();
+        // Subtle rim light and shadow
+        const inner = ctx.createLinearGradient(x, y, x + w, y);
+        inner.addColorStop(0, 'rgba(255,255,255,0.10)');
+        inner.addColorStop(0.2, 'rgba(255,255,255,0.03)');
+        inner.addColorStop(0.8, 'rgba(0,0,0,0.08)');
+        inner.addColorStop(1, 'rgba(0,0,0,0.12)');
+        ctx.fillStyle = inner;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(8, w * 0.25)); ctx.fill();
+        // Faint vertical banding for texture
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = '#ffffff';
+        for (let i = 4; i < w; i += 10) {
+            ctx.fillRect(x + i, y, 1, h);
+        }
+        ctx.globalAlpha = 1;
+        // Top lip (cap)
+        const capH = Math.min(10, h * 0.1);
+        const capGrad = ctx.createLinearGradient(x, y, x, y + capH);
+        capGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+        capGrad.addColorStop(1, 'rgba(255,255,255,0.05)');
+        ctx.fillStyle = capGrad;
+        ctx.beginPath(); ctx.roundRect(x - 2, y - 2, w + 4, capH + 4, 6); ctx.fill();
+        ctx.restore();
     }
 
     drawHUD(text: string) {

@@ -21,11 +21,19 @@ export class TitleScene implements IScene {
     private btnV: {x:number,y:number,w:number,h:number} | null = null;
     private btnVO: {x:number,y:number,w:number,h:number} | null = null;
     private btnEditName: {x:number,y:number,w:number,h:number} | null = null;
+    // UI polish: hover/press states
+    private lastPointer: { x: number; y: number } | null = null;
+    private pointerDown = false;
+    // Lefty toggle chip (for online controls preference)
+    private lefty = false;
+    private leftyRect: {x:number,y:number,w:number,h:number} | null = null;
     onResize?(engine: GameEngine): void {
         engine.ctx.setTransform(1,0,0,1,0,0);
     }
     init(engine: GameEngine): void {
         engine.canvas.focus();
+    // Load lefty preference
+    try { const l = localStorage.getItem('lefty'); this.lefty = l === '1'; } catch {}
         // Deep-link: /?room=abcd[&name=Foo]
         try {
             const url = new URL(window.location.href);
@@ -58,15 +66,22 @@ export class TitleScene implements IScene {
             if (started) return; started = true; cleanup();
             engine.setScene(versus ? new VersusScene() : new GameScene());
         };
+        const mapToCanvas = (e: PointerEvent) => {
+            const rect = engine.canvas.getBoundingClientRect();
+            const sx = engine.canvas.width / rect.width;
+            const sy = engine.canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * sx;
+            const y = (e.clientY - rect.top) * sy;
+            this.lastPointer = { x, y };
+            return { x, y };
+        };
+        const onPointerMove = (e: PointerEvent) => { try { e.stopPropagation(); } catch {}; mapToCanvas(e); };
         const onPointerDown = (e: PointerEvent) => {
             try { e.stopPropagation(); } catch {}
+            this.pointerDown = true;
+            const { x, y } = mapToCanvas(e);
             // Check for button clicks on desktop
             if (this.btnS || this.btnV || this.btnEditName) {
-                const rect = engine.canvas.getBoundingClientRect();
-                const sx = engine.canvas.width / rect.width;
-                const sy = engine.canvas.height / rect.height;
-                const x = (e.clientX - rect.left) * sx;
-                const y = (e.clientY - rect.top) * sy;
                 // If online modal is open, handle modal buttons first
                 if (this.onlineModalOpen) {
                     const hit = (b: any) => b && x>=b.x && x<=b.x+b.w && y>=b.y && y<=b.y+b.h;
@@ -117,6 +132,10 @@ export class TitleScene implements IScene {
                     // Click outside the modal does nothing
                     return;
                 }
+                if (this.leftyRect && x>=this.leftyRect.x && x<=this.leftyRect.x+this.leftyRect.w && y>=this.leftyRect.y && y<=this.leftyRect.y+this.leftyRect.h) {
+                    this.lefty = !this.lefty; try { localStorage.setItem('lefty', this.lefty ? '1' : '0'); } catch {}
+                    return;
+                }
                 if (this.btnS && x>=this.btnS.x && x<=this.btnS.x+this.btnS.w && y>=this.btnS.y && y<=this.btnS.y+this.btnS.h) return startNow(false);
                 if (this.btnV && x>=this.btnV.x && x<=this.btnV.x+this.btnV.w && y>=this.btnV.y && y<=this.btnV.y+this.btnV.h) return startNow(true);
                 if (this.btnVO && x>=this.btnVO.x && x<=this.btnVO.x+this.btnVO.w && y>=this.btnVO.y && y<=this.btnVO.y+this.btnVO.h) return startNow(true, true);
@@ -132,6 +151,7 @@ export class TitleScene implements IScene {
             }
             startNow(false);
         };
+    const onPointerUp = (e: PointerEvent) => { try { e.stopPropagation(); } catch {}; this.pointerDown = false; mapToCanvas(e); };
         const onTouchStart = (e: TouchEvent) => {
             try { e.stopPropagation(); } catch {}
             const touches = e.touches?.length ?? 0;
@@ -145,7 +165,9 @@ export class TitleScene implements IScene {
         };
         const onDocClick = (e: MouseEvent) => { if (this.onlineModalOpen) return; startNow(false); };
 
-        engine.canvas.onpointerdown = onPointerDown as any;
+    engine.canvas.onpointermove = onPointerMove as any;
+    engine.canvas.onpointerdown = onPointerDown as any;
+    engine.canvas.onpointerup = onPointerUp as any;
         engine.canvas.ontouchstart = onTouchStart as any;
         engine.canvas.onclick = onClick as any;
         document.addEventListener('pointerdown', onDocPointerDown, { passive: true });
@@ -187,7 +209,7 @@ export class TitleScene implements IScene {
     // Floating centered title
     const bob = Math.sin(this.t * 2) * 6;
     ctx.textBaseline = 'top';
-    const title = 'CrappBird';
+    const title = 'CrappyBird';
     ctx.font = '900 72px system-ui, ui-sans-serif, -apple-system, Segoe UI';
     const tw = ctx.measureText(title).width;
     const tx = Math.max(24, (w - tw) / 2);
@@ -265,14 +287,23 @@ export class TitleScene implements IScene {
     const totalW = btnW * count + gap * (count - 1);
     const bx = cardX + Math.max(pad, (cardW - totalW) / 2);
     const by = cardY + 56;
+        const isHover = (rx:number,ry:number,rw:number,rh:number) => {
+            const p = this.lastPointer; if (!p) return false; return p.x>=rx && p.x<=rx+rw && p.y>=ry && p.y<=ry+rh;
+        };
         const drawBtn = (x:number, y:number, label:string, icon?:string) => {
-            ctx.fillStyle = '#15223f';
-            ctx.strokeStyle = '#58a6ffaa';
+            const hovered = isHover(x,y,btnW,btnH);
+            const pressed = hovered && this.pointerDown;
+            ctx.save();
+            ctx.shadowColor = hovered ? '#58a6ff66' : '#00000044';
+            ctx.shadowBlur = hovered ? 12 : 6;
+            ctx.fillStyle = pressed ? '#0f1a33' : (hovered ? '#16284f' : '#15223f');
+            ctx.strokeStyle = hovered ? '#58a6ffcc' : '#58a6ffaa';
             ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.roundRect(x, y, btnW, btnH, 10); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.roundRect(x, y + (pressed?1:0), btnW, btnH - (pressed?1:0), 10); ctx.fill(); ctx.stroke();
             if (icon) { ctx.fillStyle = '#9cc9ff'; ctx.font = '700 18px system-ui'; ctx.fillText(icon, x + 12, y + 28); }
             ctx.fillStyle = '#e8e8f0'; ctx.font = '600 18px system-ui';
             ctx.fillText(label, x + (icon ? 36 : 14), y + 28);
+            ctx.restore();
         };
         drawBtn(bx, by, 'S — Singleplayer', '🎮');
         drawBtn(bx + btnW + gap, by, 'V — Versus (Local)', '🤝');
@@ -280,6 +311,23 @@ export class TitleScene implements IScene {
     this.btnS = { x: bx, y: by, w: btnW, h: btnH };
     this.btnV = { x: bx + btnW + gap, y: by, w: btnW, h: btnH };
     this.btnVO = { x: bx + (btnW + gap) * 2, y: by, w: btnW, h: btnH };
+
+        // Lefty toggle chip near Online button
+        const chipW = 120, chipH = 24, chipPad = 10;
+        const cxChip = this.btnVO.x + btnW - chipW;
+        const cyChip = by + btnH + 10;
+        ctx.save();
+        const chipHover = isHover(cxChip, cyChip, chipW, chipH);
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = this.lefty ? (chipHover ? '#25406f' : '#1f365e') : (chipHover ? '#18274a' : '#14223f');
+        ctx.strokeStyle = this.lefty ? '#93c5fd' : '#58a6ff88';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(cxChip, cyChip, chipW, chipH, 12); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#cdd9e5'; ctx.font = '600 12px system-ui';
+        const chipText = `Left-handed: ${this.lefty ? 'ON' : 'OFF'}`;
+        ctx.fillText(chipText, cxChip + chipPad, cyChip + 16);
+        ctx.restore();
+        this.leftyRect = { x: cxChip, y: cyChip, w: chipW, h: chipH };
 
         // Controls summary
     const cY = cardY + 170;
